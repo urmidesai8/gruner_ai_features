@@ -18,8 +18,7 @@ app.add_middleware(
 
 # API Routers
 app.include_router(features.router, prefix="/api/features", tags=["features"])
-# Also mount features router at /api for summarize and messages endpoints
-# app.include_router(websocket.router, tags=["websocket"])
+app.include_router(websocket.router, tags=["websocket"])
 
 # Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")
