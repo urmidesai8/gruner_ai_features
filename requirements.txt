@@ -27,7 +27,8 @@ typer-slim==0.21.1
 typing-extensions==4.15.0
 typing-inspection==0.4.2
 uvicorn==0.24.0
-uvloop==0.22.1
+
+python-multipart
 watchfiles==1.1.1
 websockets==12.0
 aiofiles
