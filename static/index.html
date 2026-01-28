@@ -287,6 +287,99 @@
         .summary-section li {
             margin: 5px 0;
         }
+
+        /* Reminder Styles */
+        .reminder-suggestion {
+            background: #f0f7ff;
+            border: 1px solid #2196F3;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .reminder-suggestion:hover {
+            background: #e3f2fd;
+        }
+
+        .reminder-suggestion h4 {
+            margin: 0 0 8px 0;
+            color: #1976D2;
+        }
+
+        .reminder-meta {
+            font-size: 0.85em;
+            color: #666;
+            margin: 5px 0;
+        }
+
+        .reminder-priority {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: bold;
+            margin-right: 8px;
+        }
+
+        .priority-high {
+            background: #ff5252;
+            color: white;
+        }
+
+        .priority-medium {
+            background: #ff9800;
+            color: white;
+        }
+
+        .priority-low {
+            background: #9e9e9e;
+            color: white;
+        }
+
+        .reminder-actions {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-create-reminder {
+            background: #4caf50;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .btn-create-reminder:hover {
+            background: #45a049;
+        }
+
+        .reminder-created {
+            background: #e8f5e9;
+            border: 1px solid #4caf50;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+
+        .task-reminder-btn {
+            background: #2196F3;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+            margin-top: 8px;
+        }
+
+        .task-reminder-btn:hover {
+            background: #1976D2;
+        }
     </style>
 </head>
 
@@ -317,6 +410,7 @@
                     <option value="smart_replies">Smart Replies</option>
                     <option value="summary">📊 Chat Summary</option>
                     <option value="tasks">✅ Extract Tasks</option>
+                    <option value="reminders">🔔 Smart Reminders</option>
                 </select>
                 <button class="btn-ai" onclick="runAIFeature()">Run Analysis</button>
             </div>
@@ -353,6 +447,20 @@
         </div>
     </div>
 
+    <!-- Reminders Modal -->
+    <div id="remindersModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeReminders()">&times;</span>
+            <h2>🔔 Smart Reminder Suggestions</h2>
+            <div style="margin-bottom: 15px;">
+                <label for="reminderContextWindow">Context Window (recent messages): </label>
+                <input type="number" id="reminderContextWindow" value="" placeholder="All messages" min="1" style="width: 100px; padding: 5px; margin-left: 10px;">
+            </div>
+            <div id="remindersLoading" style="display: none; text-align: center; padding: 20px;">Generating reminder suggestions...</div>
+            <div id="remindersResults"></div>
+        </div>
+    </div>
+
     <script>
         // --- WebSocket Setup ---
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -364,6 +472,13 @@
 
         // Global store for messages to easily update UI
         let chatMessages = [];
+
+        // Utility function to escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
 
         function connect() {
             // Connect User 1
@@ -493,6 +608,11 @@
 
             if (feature === 'tasks') {
                 await generateTasks();
+                return;
+            }
+
+            if (feature === 'reminders') {
+                await generateReminderSuggestions();
                 return;
             }
 
@@ -749,27 +869,43 @@
                     return;
                 }
 
-                const tasksHtml = tasks.map(task => {
+                const tasksHtml = tasks.map((task, index) => {
                     const title = task.title || '(untitled task)';
                     const desc = task.description || '';
                     const assignee = task.assignee || 'Unassigned';
                     const due = task.due_date || 'No deadline';
                     const status = task.status || 'todo';
                     const sourceTime = task.timestamp || '';
+                    const taskId = task.id || '';
 
                     return `
-                        <div class="summary-section">
-                            <h3>📝 ${title}</h3>
-                            <p>${desc}</p>
+                        <div class="summary-section" data-task-index="${index}">
+                            <h3>📝 ${escapeHtml(title)}</h3>
+                            <p>${escapeHtml(desc)}</p>
                             <p><strong>Status:</strong> ${status}</p>
-                            <p><strong>Assignee:</strong> ${assignee}</p>
+                            <p><strong>Assignee:</strong> ${escapeHtml(assignee)}</p>
                             <p><strong>Due date:</strong> ${due}</p>
                             ${sourceTime ? `<p><strong>From message at:</strong> ${sourceTime}</p>` : ''}
+                            <button class="task-reminder-btn" data-task-id="${taskId}" data-task-title="${escapeHtml(title)}" data-task-desc="${escapeHtml(desc)}" data-task-due="${due}" data-task-assignee="${escapeHtml(assignee)}">
+                                🔔 Create Reminder
+                            </button>
                         </div>
                     `;
                 }).join('');
 
                 results.innerHTML = tasksHtml;
+                
+                // Attach event listeners to reminder buttons
+                results.querySelectorAll('.task-reminder-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const taskId = this.getAttribute('data-task-id');
+                        const title = this.getAttribute('data-task-title');
+                        const desc = this.getAttribute('data-task-desc');
+                        const due = this.getAttribute('data-task-due');
+                        const assignee = this.getAttribute('data-task-assignee');
+                        createReminderFromTask(taskId, title, desc, due, assignee);
+                    });
+                });
             } catch (error) {
                 loading.style.display = 'none';
                 results.innerHTML = `<p style="color: red;">Error extracting tasks: ${error.message}</p>`;
@@ -780,14 +916,239 @@
             document.getElementById('tasksModal').style.display = 'none';
         }
 
+        // Smart Reminders functionality
+        async function generateReminderSuggestions() {
+            if (chatMessages.length === 0) {
+                alert("No messages to analyze for reminders.");
+                return;
+            }
+
+            const modal = document.getElementById('remindersModal');
+            const loading = document.getElementById('remindersLoading');
+            const results = document.getElementById('remindersResults');
+            const contextWindowInput = document.getElementById('reminderContextWindow');
+
+            modal.style.display = 'block';
+            loading.style.display = 'block';
+            results.innerHTML = '';
+
+            try {
+                const username = user1Name;
+                const contextWindow = contextWindowInput.value ? parseInt(contextWindowInput.value) : null;
+
+                const requestBody = {
+                    username: username,
+                    context_window: contextWindow
+                };
+
+                const response = await fetch('/api/features/smart-reminders/suggestions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                const suggestions = Array.isArray(data.suggestions) ? data.suggestions : [];
+                loading.style.display = 'none';
+
+                if (suggestions.length === 0) {
+                    results.innerHTML = '<p>No reminder suggestions found. Try having more conversations with action items or deadlines.</p>';
+                    return;
+                }
+
+                const suggestionsHtml = suggestions.map(suggestion => {
+                    const id = suggestion.id || '';
+                    const title = suggestion.title || '(untitled)';
+                    const desc = suggestion.description || '';
+                    const dueDate = suggestion.suggested_due_date || 'No deadline';
+                    const priority = (suggestion.priority || 'medium').toLowerCase();
+                    const context = suggestion.context || '';
+                    const confidence = suggestion.confidence || 0;
+
+                    const priorityClass = `priority-${priority}`;
+                    const priorityLabel = priority.charAt(0).toUpperCase() + priority.slice(1);
+
+                    return `
+                        <div class="reminder-suggestion" data-suggestion-id="${id}">
+                            <h4>${escapeHtml(title)}</h4>
+                            <p>${escapeHtml(desc)}</p>
+                            ${context ? `<p class="reminder-meta"><em>"${escapeHtml(context)}"</em></p>` : ''}
+                            <div class="reminder-meta">
+                                <span class="reminder-priority ${priorityClass}">${priorityLabel}</span>
+                                <span>Due: ${dueDate}</span>
+                                <span style="margin-left: 10px;">Confidence: ${(confidence * 100).toFixed(0)}%</span>
+                            </div>
+                            <div class="reminder-actions">
+                                <button class="btn-create-reminder" data-suggestion-id="${id}" data-suggestion-title="${escapeHtml(title)}" data-suggestion-desc="${escapeHtml(desc)}" data-suggestion-due="${dueDate}">
+                                    Create Reminder
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                results.innerHTML = suggestionsHtml;
+                
+                // Attach event listeners to reminder creation buttons
+                results.querySelectorAll('.btn-create-reminder').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const id = this.getAttribute('data-suggestion-id');
+                        const title = this.getAttribute('data-suggestion-title');
+                        const desc = this.getAttribute('data-suggestion-desc');
+                        const dueDate = this.getAttribute('data-suggestion-due');
+                        createReminderFromSuggestion(id, title, desc, dueDate, null);
+                    });
+                });
+            } catch (error) {
+                loading.style.display = 'none';
+                results.innerHTML = `<p style="color: red;">Error generating reminder suggestions: ${error.message}</p>`;
+            }
+        }
+
+        function closeReminders() {
+            document.getElementById('remindersModal').style.display = 'none';
+        }
+
+        async function createReminderFromSuggestion(suggestionId, title, description, dueDate, assignee) {
+            try {
+                const requestBody = {
+                    task_id: suggestionId,
+                    title: title,
+                    description: description || null,
+                    due_date: dueDate !== 'No deadline' ? dueDate : null,
+                    assignee: assignee || null,
+                    reminder_time: null
+                };
+
+                const response = await fetch('/api/features/smart-reminders/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                // Show success message
+                const results = document.getElementById('remindersResults');
+                const successMsg = document.createElement('div');
+                successMsg.className = 'reminder-created';
+                successMsg.innerHTML = `
+                    <strong>✅ Reminder Created!</strong>
+                    <p><strong>Title:</strong> ${data.title}</p>
+                    ${data.due_date ? `<p><strong>Due Date:</strong> ${data.due_date}</p>` : ''}
+                    ${data.reminder_time ? `<p><strong>Reminder Time:</strong> ${new Date(data.reminder_time).toLocaleString()}</p>` : ''}
+                    <p><strong>Status:</strong> ${data.status}</p>
+                `;
+                results.insertBefore(successMsg, results.firstChild);
+
+                // Remove the suggestion from the list
+                const suggestionElement = results.querySelector(`[data-suggestion-id="${suggestionId}"]`);
+                if (suggestionElement) {
+                    // Add a fade-out animation before removing
+                    suggestionElement.style.transition = 'opacity 0.3s ease-out';
+                    suggestionElement.style.opacity = '0';
+                    setTimeout(() => {
+                        suggestionElement.remove();
+                        
+                        // If no suggestions remain, show a message
+                        const remainingSuggestions = results.querySelectorAll('.reminder-suggestion');
+                        if (remainingSuggestions.length === 0) {
+                            results.innerHTML = '<p>All reminders have been created. No more suggestions available.</p>';
+                        }
+                    }, 300);
+                }
+
+                // Scroll to top to show the success message
+                results.scrollTop = 0;
+
+                // Remove success message after 5 seconds
+                setTimeout(() => {
+                    successMsg.remove();
+                }, 5000);
+
+            } catch (error) {
+                alert(`Error creating reminder: ${error.message}`);
+            }
+        }
+
+        async function createReminderFromTask(taskId, title, description, dueDate, assignee) {
+            try {
+                const requestBody = {
+                    task_id: taskId,
+                    title: title,
+                    description: description || null,
+                    due_date: dueDate !== 'No deadline' ? dueDate : null,
+                    assignee: assignee !== 'Unassigned' ? assignee : null,
+                    reminder_time: null
+                };
+
+                const response = await fetch('/api/features/smart-reminders/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestBody)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                // Show success message in tasks modal
+                const results = document.getElementById('tasksResults');
+                const successMsg = document.createElement('div');
+                successMsg.className = 'reminder-created';
+                successMsg.innerHTML = `
+                    <strong>✅ Reminder Created from Task!</strong>
+                    <p><strong>Title:</strong> ${data.title}</p>
+                    ${data.due_date ? `<p><strong>Due Date:</strong> ${data.due_date}</p>` : ''}
+                    ${data.reminder_time ? `<p><strong>Reminder Time:</strong> ${new Date(data.reminder_time).toLocaleString()}</p>` : ''}
+                    <p><strong>Status:</strong> ${data.status}</p>
+                `;
+                results.insertBefore(successMsg, results.firstChild);
+
+                // Scroll to top to show the success message
+                results.scrollTop = 0;
+
+                // Remove success message after 5 seconds
+                setTimeout(() => {
+                    successMsg.remove();
+                }, 5000);
+
+            } catch (error) {
+                alert(`Error creating reminder: ${error.message}`);
+            }
+        }
+
         // Close modal when clicking outside
         window.onclick = function(event) {
             const summaryModal = document.getElementById('summaryModal');
             const tasksModal = document.getElementById('tasksModal');
+            const remindersModal = document.getElementById('remindersModal');
             if (event.target == summaryModal) {
                 summaryModal.style.display = 'none';
             } else if (event.target == tasksModal) {
                 tasksModal.style.display = 'none';
+            } else if (event.target == remindersModal) {
+                remindersModal.style.display = 'none';
             }
         }
 

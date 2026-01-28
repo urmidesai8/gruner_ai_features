@@ -17,6 +17,35 @@ class FeatureRequest(BaseModel):
     message: str
 
 
+class ReminderSuggestionRequest(BaseModel):
+    """Request model for context-based reminder suggestions"""
+    username: Optional[str] = None
+    context_window: Optional[int] = None  # Number of recent messages to consider
+
+
+class ReminderCreateRequest(BaseModel):
+    """Request model for one-click reminder creation from action items"""
+    task_id: str
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[str] = None  # ISO date format (YYYY-MM-DD)
+    assignee: Optional[str] = None
+    reminder_time: Optional[str] = None  # ISO datetime format for when to remind
+
+
+class Reminder(BaseModel):
+    """Model for a reminder"""
+    id: str
+    title: str
+    description: Optional[str] = None
+    due_date: Optional[str] = None
+    assignee: Optional[str] = None
+    reminder_time: Optional[str] = None
+    created_at: str
+    source_task_id: Optional[str] = None
+    status: str = "pending"  # pending, completed, cancelled
+
+
 class ChatHistory:
     """Stores chat message history with unread tracking."""
 

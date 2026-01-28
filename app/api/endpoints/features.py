@@ -2,10 +2,19 @@ from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 import json
-from ...models.schemas import FeatureRequest, chat_history
+from ...models.schemas import (
+    FeatureRequest,
+    chat_history,
+    ReminderSuggestionRequest,
+    ReminderCreateRequest,
+)
 from ...services.ai_service import call_groq_ai
 from ...services.summarizer import generate_chat_summary
 from ...services.task_classifier import extract_tasks_from_messages
+from ...services.reminder_service import (
+    generate_context_based_suggestions,
+    create_reminder_from_task,
+)
 
 router = APIRouter()
 
@@ -160,4 +169,85 @@ async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(
             status_code=500, detail=f"Error classifying tasks: {str(e)}"
+        ) from e
+
+
+@router.post("/smart-reminders/suggestions")
+async def get_reminder_suggestions(
+    request: ReminderSuggestionRequest,
+) -> JSONResponse:
+    """Generate context-based reminder suggestions from chat history.
+
+    Request body:
+    - username: Optional username to get personalized suggestions
+    - context_window: Optional number of recent messages to consider (default: all)
+
+    Returns:
+    {
+        "suggestions": [
+            {
+                "id": "suggestion-1",
+                "title": "Reminder title",
+                "description": "Context-aware description",
+                "suggested_due_date": "2026-02-01" | null,
+                "priority": "low" | "medium" | "high",
+                "context": "Relevant chat context",
+                "confidence": 0.85
+            },
+            ...
+        ]
+    }
+    """
+    try:
+        result = generate_context_based_suggestions(
+            username=request.username, context_window=request.context_window
+        )
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error generating reminder suggestions: {str(e)}",
+        ) from e
+
+
+@router.post("/smart-reminders/create")
+async def create_reminder(request: ReminderCreateRequest) -> JSONResponse:
+    """Create a reminder from an action item with one-click creation.
+
+    Request body:
+    - task_id: ID of the source task/action item (required)
+    - title: Reminder title (required)
+    - description: Optional reminder description
+    - due_date: Optional due date in ISO format (YYYY-MM-DD)
+    - assignee: Optional assignee name
+    - reminder_time: Optional reminder time in ISO datetime format
+
+    Returns:
+    {
+        "id": "reminder-id",
+        "title": "...",
+        "description": "...",
+        "due_date": "...",
+        "assignee": "...",
+        "reminder_time": "...",
+        "created_at": "...",
+        "source_task_id": "...",
+        "status": "pending"
+    }
+    """
+    try:
+        reminder = create_reminder_from_task(
+            task_id=request.task_id,
+            title=request.title,
+            description=request.description,
+            due_date=request.due_date,
+            assignee=request.assignee,
+            reminder_time=request.reminder_time,
+        )
+        return JSONResponse(content=reminder)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500, detail=f"Error creating reminder: {str(e)}"
         ) from e
