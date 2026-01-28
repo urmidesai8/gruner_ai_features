@@ -793,7 +793,7 @@
             try {
                 // Use User 1 as the username for summary (or could be configurable)
                 const username = user1Name;
-                const response = await fetch(`/api/summarize?username=${encodeURIComponent(username)}`, {
+                const response = await fetch(`/api/features/chat-summarize?username=${encodeURIComponent(username)}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -880,7 +880,7 @@
             try {
                 // Use User 1 as the username for tasks (or could be configurable)
                 const username = user1Name;
-                const response = await fetch(`/api/tasks?username=${encodeURIComponent(username)}`, {
+                const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
