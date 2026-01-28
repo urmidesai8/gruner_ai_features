@@ -240,7 +240,7 @@
             top: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.5);
+            background-color: rgba(0, 0, 0, 0.5);
         }
 
         .modal-content {
@@ -424,10 +424,10 @@
                     <option value="prioritize">Message Prioritization</option>
                     <option value="moderate">AI Moderation</option>
                     <option value="smart_replies">Smart Replies</option>
-                    <option value="summary">📊 Chat Summary</option>
-                    <option value="tasks">✅ Extract Tasks</option>
-                    <option value="reminders">🔔 Smart Reminders</option>
-                    <option value="translate">🌐 Language Translation</option>
+                    <option value="summary">Chat Summary</option>
+                    <option value="tasks">Extract Tasks</option>
+                    <option value="reminders">Smart Reminders</option>
+                    <option value="translate">Language Translation</option>
                 </select>
                 <label for="translationLanguage"><strong>Language:</strong></label>
                 <select id="translationLanguage">
@@ -459,7 +459,8 @@
         <div class="modal-content">
             <span class="close" onclick="closeSummary()">&times;</span>
             <h2>Chat Summary</h2>
-            <div id="summaryLoading" style="display: none; text-align: center; padding: 20px;">Generating summary...</div>
+            <div id="summaryLoading" style="display: none; text-align: center; padding: 20px;">Generating summary...
+            </div>
             <div id="summaryResults"></div>
         </div>
     </div>
@@ -478,12 +479,14 @@
     <div id="remindersModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeReminders()">&times;</span>
-            <h2>🔔 Smart Reminder Suggestions</h2>
+            <h2>Smart Reminder Suggestions</h2>
             <div style="margin-bottom: 15px;">
                 <label for="reminderContextWindow">Context Window (recent messages): </label>
-                <input type="number" id="reminderContextWindow" value="" placeholder="All messages" min="1" style="width: 100px; padding: 5px; margin-left: 10px;">
+                <input type="number" id="reminderContextWindow" value="" placeholder="All messages" min="1"
+                    style="width: 100px; padding: 5px; margin-left: 10px;">
             </div>
-            <div id="remindersLoading" style="display: none; text-align: center; padding: 20px;">Generating reminder suggestions...</div>
+            <div id="remindersLoading" style="display: none; text-align: center; padding: 20px;">Generating reminder
+                suggestions...</div>
             <div id="remindersResults"></div>
         </div>
     </div>
@@ -762,10 +765,14 @@
                 btn.className = 'suggestion-btn';
                 btn.textContent = s;
                 btn.onclick = () => {
-                    // Start typing in User 1 or 2 box?
-                    // Let's just put it in BOTH input boxes as a "Draft"
-                    document.getElementById('input1').value = s;
-                    document.getElementById('input2').value = s;
+                    // Smartly decide which user is replying
+                    // If the last message was from User 1, then User 2 is replying.
+                    const lastMsg = chatMessages[chatMessages.length - 1];
+                    if (lastMsg && lastMsg.sender === user1Name) {
+                        document.getElementById('input2').value = s;
+                    } else {
+                        document.getElementById('input1').value = s;
+                    }
                     div.remove();
                 };
                 div.appendChild(btn);
@@ -785,7 +792,7 @@
             const modal = document.getElementById('summaryModal');
             const loading = document.getElementById('summaryLoading');
             const results = document.getElementById('summaryResults');
-            
+
             modal.style.display = 'block';
             loading.style.display = 'block';
             results.innerHTML = '';
@@ -813,9 +820,9 @@
                 const keyDecisions = Array.isArray(data.key_decisions) ? data.key_decisions : [];
                 const actionItems = Array.isArray(data.action_items) ? data.action_items : [];
                 const unreadSummary = data.unread_summary || 'No unread summary available.';
-                
+
                 loading.style.display = 'none';
-                
+
                 let html = `
                     <div class="summary-section">
                         <h3>📋 Overview</h3>
@@ -850,7 +857,7 @@
                         </ul>
                     </div>
                 `;
-                
+
                 results.innerHTML = html;
             } catch (error) {
                 loading.style.display = 'none';
@@ -926,10 +933,10 @@
                 }).join('');
 
                 results.innerHTML = tasksHtml;
-                
+
                 // Attach event listeners to reminder buttons
                 results.querySelectorAll('.task-reminder-btn').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         const taskId = this.getAttribute('data-task-id');
                         const title = this.getAttribute('data-task-title');
                         const desc = this.getAttribute('data-task-desc');
@@ -1105,10 +1112,10 @@
                 }).join('');
 
                 results.innerHTML = suggestionsHtml;
-                
+
                 // Attach event listeners to reminder creation buttons
                 results.querySelectorAll('.btn-create-reminder').forEach(btn => {
-                    btn.addEventListener('click', function() {
+                    btn.addEventListener('click', function () {
                         const id = this.getAttribute('data-suggestion-id');
                         const title = this.getAttribute('data-suggestion-title');
                         const desc = this.getAttribute('data-suggestion-desc');
@@ -1173,7 +1180,7 @@
                     suggestionElement.style.opacity = '0';
                     setTimeout(() => {
                         suggestionElement.remove();
-                        
+
                         // If no suggestions remain, show a message
                         const remainingSuggestions = results.querySelectorAll('.reminder-suggestion');
                         if (remainingSuggestions.length === 0) {
@@ -1248,7 +1255,7 @@
         }
 
         // Close modal when clicking outside
-        window.onclick = function(event) {
+        window.onclick = function (event) {
             const summaryModal = document.getElementById('summaryModal');
             const tasksModal = document.getElementById('tasksModal');
             const remindersModal = document.getElementById('remindersModal');
