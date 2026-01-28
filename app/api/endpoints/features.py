@@ -7,6 +7,7 @@ from ...models.schemas import (
     chat_history,
     ReminderSuggestionRequest,
     ReminderCreateRequest,
+    TranslationRequest,
 )
 from ...services.ai_service import call_groq_ai
 from ...services.summarizer import generate_chat_summary
@@ -15,6 +16,7 @@ from ...services.reminder_service import (
     generate_context_based_suggestions,
     create_reminder_from_task,
 )
+from ...services.translation_service import translate_messages_batch
 
 router = APIRouter()
 
@@ -250,4 +252,42 @@ async def create_reminder(request: ReminderCreateRequest) -> JSONResponse:
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(
             status_code=500, detail=f"Error creating reminder: {str(e)}"
+        ) from e
+
+
+@router.post("/translate")
+async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse:
+    """Translate chat messages into a target language.
+
+    Request body: List of objects
+    [
+      {
+        "id": "message-id",
+        "text": "Hello, world!",
+        "target_language": "es"
+      },
+      ...
+    ]
+
+    Returns:
+    {
+      "translations": {
+        "message-id": {
+          "translated_text": "Hola, mundo!",
+          "detected_language": "en"
+        },
+        ...
+      }
+    }
+    """
+    if not requests:
+        return JSONResponse(content={"translations": {}})
+
+    try:
+        payload = [r.dict() for r in requests]
+        result = translate_messages_batch(payload)
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500, detail=f"Error translating messages: {str(e)}"
         ) from e

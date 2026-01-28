@@ -380,6 +380,22 @@
         .task-reminder-btn:hover {
             background: #1976D2;
         }
+
+        /* Translation styles */
+        .translation-box {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #f1f8e9;
+            border-left: 3px solid #8bc34a;
+            font-size: 0.9em;
+        }
+
+        .translation-header {
+            font-weight: bold;
+            color: #558b2f;
+            margin-bottom: 4px;
+        }
     </style>
 </head>
 
@@ -411,6 +427,17 @@
                     <option value="summary">📊 Chat Summary</option>
                     <option value="tasks">✅ Extract Tasks</option>
                     <option value="reminders">🔔 Smart Reminders</option>
+                    <option value="translate">🌐 Language Translation</option>
+                </select>
+                <label for="translationLanguage"><strong>Language:</strong></label>
+                <select id="translationLanguage">
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="hi">Hindi</option>
+                    <option value="zh">Chinese</option>
+                    <option value="ja">Japanese</option>
                 </select>
                 <button class="btn-ai" onclick="runAIFeature()">Run Analysis</button>
             </div>
@@ -608,6 +635,11 @@
 
             if (feature === 'tasks') {
                 await generateTasks();
+                return;
+            }
+
+            if (feature === 'translate') {
+                await translateMessages();
                 return;
             }
 
@@ -914,6 +946,83 @@
 
         function closeTasks() {
             document.getElementById('tasksModal').style.display = 'none';
+        }
+
+        // Language translation functionality
+        async function translateMessages() {
+            if (chatMessages.length === 0) {
+                alert("No messages to translate.");
+                return;
+            }
+
+            const statusEl = document.getElementById('aiStatus');
+            const langSelect = document.getElementById('translationLanguage');
+            const targetLang = langSelect ? langSelect.value : 'en';
+            const targetLangLabel = langSelect
+                ? langSelect.options[langSelect.selectedIndex].text
+                : targetLang.toUpperCase();
+
+            statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
+
+            try {
+                const payload = chatMessages.map(m => ({
+                    id: m.id,
+                    text: m.message,
+                    target_language: targetLang
+                }));
+
+                const response = await fetch('/api/features/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                applyTranslations(data, targetLangLabel);
+                statusEl.textContent = `Translation complete (${targetLangLabel}).`;
+            } catch (error) {
+                console.error(error);
+                statusEl.textContent = "Error during translation.";
+                alert(`Error translating messages: ${error.message}`);
+            }
+        }
+
+        function applyTranslations(data, targetLangLabel) {
+            const translations = data && data.translations ? data.translations : {};
+            let appliedCount = 0;
+
+            chatMessages.forEach(msg => {
+                const t = translations[msg.id];
+                if (t && t.translated_text) {
+                    const container = msg.element;
+
+                    // Remove any existing translation box for this message
+                    const existing = container.querySelector('.translation-box');
+                    if (existing) {
+                        existing.remove();
+                    }
+
+                    const div = document.createElement('div');
+                    div.className = 'translation-box';
+                    div.innerHTML = `
+                        <div class="translation-header">Translated (${targetLangLabel})</div>
+                        <div class="translation-body">${escapeHtml(t.translated_text)}</div>
+                    `;
+
+                    container.appendChild(div);
+                    appliedCount++;
+                }
+            });
+
+            if (appliedCount === 0) {
+                alert("No translations returned or IDs mismatch.");
+            }
         }
 
         // Smart Reminders functionality

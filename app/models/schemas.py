@@ -17,6 +17,13 @@ class FeatureRequest(BaseModel):
     message: str
 
 
+class TranslationRequest(BaseModel):
+    """Request model for language translation"""
+    id: str
+    text: str
+    target_language: str  # e.g. 'en', 'es', 'fr', 'de', 'hi', 'zh', 'ja'
+
+
 class ReminderSuggestionRequest(BaseModel):
     """Request model for context-based reminder suggestions"""
     username: Optional[str] = None
