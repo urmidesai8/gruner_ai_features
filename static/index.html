@@ -230,6 +230,63 @@
             cursor: pointer;
             font-size: 0.85em;
         }
+
+        /* Summary and Tasks Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 5% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 700px;
+            max-height: 80vh;
+            overflow-y: auto;
+            border-radius: 10px;
+        }
+
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close:hover {
+            color: black;
+        }
+
+        .summary-section {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+
+        .summary-section h3 {
+            margin-top: 0;
+            color: #2196F3;
+        }
+
+        .summary-section ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .summary-section li {
+            margin: 5px 0;
+        }
     </style>
 </head>
 
@@ -258,6 +315,8 @@
                     <option value="prioritize">Message Prioritization</option>
                     <option value="moderate">AI Moderation</option>
                     <option value="smart_replies">Smart Replies</option>
+                    <option value="summary">📊 Chat Summary</option>
+                    <option value="tasks">✅ Extract Tasks</option>
                 </select>
                 <button class="btn-ai" onclick="runAIFeature()">Run Analysis</button>
             </div>
@@ -271,6 +330,26 @@
             <button class="send-btn btn-user2" onclick="sendUser2()">
                 << Send</button>
                     <div id="status2" style="font-size:0.8em; color:gray; text-align:center;">Disconnected</div>
+        </div>
+    </div>
+
+    <!-- Summary Modal -->
+    <div id="summaryModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeSummary()">&times;</span>
+            <h2>Chat Summary</h2>
+            <div id="summaryLoading" style="display: none; text-align: center; padding: 20px;">Generating summary...</div>
+            <div id="summaryResults"></div>
+        </div>
+    </div>
+
+    <!-- Tasks Modal -->
+    <div id="tasksModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeTasks()">&times;</span>
+            <h2>Chat Tasks / To-Dos</h2>
+            <div id="tasksLoading" style="display: none; text-align: center; padding: 20px;">Extracting tasks...</div>
+            <div id="tasksResults"></div>
         </div>
     </div>
 
@@ -406,6 +485,18 @@
                 return;
             }
 
+            // Handle summary and tasks features directly (they open modals)
+            if (feature === 'summary') {
+                await generateSummary();
+                return;
+            }
+
+            if (feature === 'tasks') {
+                await generateTasks();
+                return;
+            }
+
+            // Handle other AI features (prioritize, moderate, smart_replies)
             statusEl.textContent = "Analyzing...";
 
             try {
@@ -530,6 +621,174 @@
 
             container.appendChild(div);
             container.scrollTop = container.scrollHeight;
+        }
+
+        // Summary functionality
+        async function generateSummary() {
+            if (chatMessages.length === 0) {
+                alert("No messages to summarize.");
+                return;
+            }
+
+            const modal = document.getElementById('summaryModal');
+            const loading = document.getElementById('summaryLoading');
+            const results = document.getElementById('summaryResults');
+            
+            modal.style.display = 'block';
+            loading.style.display = 'block';
+            results.innerHTML = '';
+
+            try {
+                // Use User 1 as the username for summary (or could be configurable)
+                const username = user1Name;
+                const response = await fetch(`/api/summarize?username=${encodeURIComponent(username)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                const summary = data.summary || 'No summary available.';
+                const totalMessages = typeof data.total_messages === 'number' ? data.total_messages : 0;
+                const participants = Array.isArray(data.participants) ? data.participants : [];
+                const bulletPoints = Array.isArray(data.bullet_points) ? data.bullet_points : [];
+                const keyDecisions = Array.isArray(data.key_decisions) ? data.key_decisions : [];
+                const actionItems = Array.isArray(data.action_items) ? data.action_items : [];
+                const unreadSummary = data.unread_summary || 'No unread summary available.';
+                
+                loading.style.display = 'none';
+                
+                let html = `
+                    <div class="summary-section">
+                        <h3>📋 Overview</h3>
+                        <p>${summary}</p>
+                        <p><strong>Total Messages:</strong> ${totalMessages}</p>
+                        <p><strong>Participants:</strong> ${participants.join(', ')}</p>
+                    </div>
+                    
+                    <div class="summary-section">
+                        <h3>💬 What Did I Miss?</h3>
+                        <p>${unreadSummary}</p>
+                    </div>
+                    
+                    <div class="summary-section">
+                        <h3>📝 Key Points</h3>
+                        <ul>
+                            ${bulletPoints.map(point => `<li>${point}</li>`).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="summary-section">
+                        <h3>✅ Key Decisions</h3>
+                        <ul>
+                            ${keyDecisions.map(decision => `<li>${decision}</li>`).join('')}
+                        </ul>
+                    </div>
+                    
+                    <div class="summary-section">
+                        <h3>🎯 Action Items</h3>
+                        <ul>
+                            ${actionItems.map(action => `<li>${action}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+                
+                results.innerHTML = html;
+            } catch (error) {
+                loading.style.display = 'none';
+                results.innerHTML = `<p style="color: red;">Error generating summary: ${error.message}</p>`;
+            }
+        }
+
+        function closeSummary() {
+            document.getElementById('summaryModal').style.display = 'none';
+        }
+
+        // Tasks classification functionality
+        async function generateTasks() {
+            if (chatMessages.length === 0) {
+                alert("No messages to analyze for tasks.");
+                return;
+            }
+
+            const modal = document.getElementById('tasksModal');
+            const loading = document.getElementById('tasksLoading');
+            const results = document.getElementById('tasksResults');
+
+            modal.style.display = 'block';
+            loading.style.display = 'block';
+            results.innerHTML = '';
+
+            try {
+                // Use User 1 as the username for tasks (or could be configurable)
+                const username = user1Name;
+                const response = await fetch(`/api/tasks?username=${encodeURIComponent(username)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data && data.detail ? data.detail : 'Server returned an error';
+                    throw new Error(detail);
+                }
+
+                const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+                loading.style.display = 'none';
+
+                if (tasks.length === 0) {
+                    results.innerHTML = '<p>No tasks found in the current conversation.</p>';
+                    return;
+                }
+
+                const tasksHtml = tasks.map(task => {
+                    const title = task.title || '(untitled task)';
+                    const desc = task.description || '';
+                    const assignee = task.assignee || 'Unassigned';
+                    const due = task.due_date || 'No deadline';
+                    const status = task.status || 'todo';
+                    const sourceTime = task.timestamp || '';
+
+                    return `
+                        <div class="summary-section">
+                            <h3>📝 ${title}</h3>
+                            <p>${desc}</p>
+                            <p><strong>Status:</strong> ${status}</p>
+                            <p><strong>Assignee:</strong> ${assignee}</p>
+                            <p><strong>Due date:</strong> ${due}</p>
+                            ${sourceTime ? `<p><strong>From message at:</strong> ${sourceTime}</p>` : ''}
+                        </div>
+                    `;
+                }).join('');
+
+                results.innerHTML = tasksHtml;
+            } catch (error) {
+                loading.style.display = 'none';
+                results.innerHTML = `<p style="color: red;">Error extracting tasks: ${error.message}</p>`;
+            }
+        }
+
+        function closeTasks() {
+            document.getElementById('tasksModal').style.display = 'none';
+        }
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const summaryModal = document.getElementById('summaryModal');
+            const tasksModal = document.getElementById('tasksModal');
+            if (event.target == summaryModal) {
+                summaryModal.style.display = 'none';
+            } else if (event.target == tasksModal) {
+                tasksModal.style.display = 'none';
+            }
         }
 
         // Initial Connect
