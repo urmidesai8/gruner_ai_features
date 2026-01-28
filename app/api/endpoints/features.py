@@ -99,7 +99,8 @@ async def smart_replies(messages: List[FeatureRequest]):
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         result = json.loads(response_text)
-    except Exception:
+    except Exception as e:
+        print(f"Error in smart_replies: {e}")
         result = {"suggestions": []}
 
     return JSONResponse(content=result)
