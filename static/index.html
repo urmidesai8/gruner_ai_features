@@ -428,7 +428,6 @@
                     <option value="tasks">Extract Tasks</option>
                     <option value="reminders">Smart Reminders</option>
                     <option value="translate">Language Translation</option>
-                    <option value="transcribe">Audio Transcription</option>
                 </select>
                 <label for="translationLanguage"><strong>Language:</strong></label>
                 <select id="translationLanguage">
@@ -491,31 +490,6 @@
             <div id="remindersResults"></div>
         </div>
     </div>
-
-    <!-- Transcription Modal -->
-    <div id="transcriptionModal" class="modal">
-        <div class="modal-content">
-            <span class="close" onclick="closeTranscription()">&times;</span>
-            <h2>Audio Transcription</h2>
-            <div style="margin-bottom: 20px; text-align: center;">
-                <input type="file" id="audioInput" accept="audio/*" style="display: block; margin: 10px auto;">
-                <button class="btn-ai" onclick="uploadForTranscription()">Transcribe Now</button>
-                <button id="btnSummarizeTranscript" class="btn-ai"
-                    style="display:none; margin-left:10px; background-color: #ff9800;"
-                    onclick="generateTranscriptSummary()">Generate Summary</button>
-            </div>
-            <div id="transcriptionLoading" style="display: none; text-align: center; padding: 20px;">Transcribing audio
-                file...</div>
-            <div id="transcriptionResults"
-                style="white-space: pre-wrap; background: #f9f9f9; padding: 15px; border-radius: 5px; margin-top: 10px; min-height: 100px;">
-            </div>
-            <div id="transcriptionSummaryResult"
-                style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;"></div>
-        </div>
-    </div>
-    </div>
-
-
 
     <script>
         // --- WebSocket Setup ---
@@ -651,16 +625,6 @@
                 return;
             }
 
-            if (feature === 'transcribe') {
-                document.getElementById('transcriptionModal').style.display = 'block';
-                return;
-            }
-
-            if (feature === 'transcribe') {
-                document.getElementById('transcriptionModal').style.display = 'block';
-                return;
-            }
-
             if (chatMessages.length === 0) {
                 alert("No messages to analyze.");
                 return;
@@ -679,11 +643,6 @@
 
             if (feature === 'translate') {
                 await translateMessages();
-                return;
-            }
-
-            if (feature === 'transcribe') {
-                document.getElementById('transcriptionModal').style.display = 'block';
                 return;
             }
 
@@ -1296,117 +1255,17 @@
         }
 
         // Close modal when clicking outside
-        // Transcription functionality
-        async function uploadForTranscription() {
-            const fileInput = document.getElementById('audioInput');
-            const file = fileInput.files[0];
-
-            if (!file) {
-                alert("Please select an audio file first.");
-                return;
-            }
-
-            const loading = document.getElementById('transcriptionLoading');
-            const results = document.getElementById('transcriptionResults');
-
-            loading.style.display = 'block';
-            results.textContent = '';
-
-            const formData = new FormData();
-            formData.append('file', file);
-
-            try {
-                const response = await fetch('/api/features/transcribe', {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-
-                loading.style.display = 'none';
-
-                if (!response.ok) {
-                    throw new Error(data.detail || 'Transcription failed');
-                }
-
-                results.textContent = data.transcription;
-
-                // Show the "Generate Summary" button
-                document.getElementById('btnSummarizeTranscript').style.display = 'inline-block';
-
-            } catch (error) {
-                loading.style.display = 'none';
-                results.innerHTML = `<span style="color:red">Error: ${error.message}</span>`;
-            }
-        }
-
-        async function generateTranscriptSummary() {
-            const transcriptText = document.getElementById('transcriptionResults').textContent;
-            if (!transcriptText) return;
-
-            const results = document.getElementById('transcriptionSummaryResult');
-
-            // Show loading state directly in the result div
-            results.innerHTML = '<div style="text-align:center; padding:10px;">Generating summary...</div>';
-
-            try {
-                const response = await fetch('/api/features/summarize-text', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: transcriptText })
-                });
-
-                const data = await response.json();
-
-                let html = `
-                    <div class="summary-section">
-                        <h3>📋 Overview</h3>
-                        <p>${data.summary}</p>
-                    </div>
-                    
-                    <div class="summary-section">
-                        <h3>ℹ️ Key Points</h3>
-                        <ul>
-                            ${data.bullet_points.map(p => `<li>${p}</li>`).join('')}
-                        </ul>
-                    </div>
-
-                    <div class="summary-section">
-                        <h3>⚖️ Key Decisions</h3>
-                        <ul>
-                            ${data.key_decisions.map(d => `<li>${d}</li>`).join('')}
-                        </ul>
-                    </div>
-
-                    <div class="summary-section">
-                        <h3>✅ Action Items</h3>
-                        <ul>
-                            ${data.action_items.map(a => `<li>${a}</li>`).join('')}
-                        </ul>
-                    </div>
-                `;
-                results.innerHTML = html;
-
-            } catch (error) {
-                results.innerHTML = `<p style="color:red">Error generating summary: ${error.message}</p>`;
-            }
-        }
-
-        function closeTranscription() {
-            document.getElementById('transcriptionModal').style.display = 'none';
-        }
-
-        // Close modal when clicking outside
         window.onclick = function (event) {
             const summaryModal = document.getElementById('summaryModal');
             const tasksModal = document.getElementById('tasksModal');
             const remindersModal = document.getElementById('remindersModal');
-            const transcriptionModal = document.getElementById('transcriptionModal');
-
-            if (event.target == summaryModal) summaryModal.style.display = 'none';
-            if (event.target == tasksModal) tasksModal.style.display = 'none';
-            if (event.target == remindersModal) remindersModal.style.display = 'none';
-            if (event.target == transcriptionModal) transcriptionModal.style.display = 'none';
+            if (event.target == summaryModal) {
+                summaryModal.style.display = 'none';
+            } else if (event.target == tasksModal) {
+                tasksModal.style.display = 'none';
+            } else if (event.target == remindersModal) {
+                remindersModal.style.display = 'none';
+            }
         }
 
         // Initial Connect
