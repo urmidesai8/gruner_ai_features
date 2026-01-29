@@ -17,11 +17,23 @@ class FeatureRequest(BaseModel):
     message: str
 
 
+class SmartRepliesRequest(BaseModel):
+    """Request model for smart replies generation"""
+    messages: List[FeatureRequest]
+    tone: str = "auto"  # auto, professional, casual, friendly, formal
+
+
 class TranslationRequest(BaseModel):
     """Request model for language translation"""
     id: str
     text: str
     target_language: str  # e.g. 'en', 'es', 'fr', 'de', 'hi', 'zh', 'ja'
+
+
+class SummarizeRequest(BaseModel):
+    """Request model for chat summarization"""
+    username: Optional[str] = None
+    total_messages: Optional[int] = 100  # Number of recent messages to consider (default: 100)
 
 
 class ReminderSuggestionRequest(BaseModel):

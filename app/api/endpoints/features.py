@@ -1,26 +1,24 @@
-from fastapi import APIRouter, HTTPException, File, UploadFile
+from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 import json
-from pydantic import BaseModel
 from ...models.schemas import (
     FeatureRequest,
     chat_history,
+    SummarizeRequest,
+    SmartRepliesRequest,
     ReminderSuggestionRequest,
     ReminderCreateRequest,
     TranslationRequest,
 )
-from ...services.ai_service import call_groq_ai, transcribe_audio
-from ...services.summarizer import generate_chat_summary, generate_text_summary
+from ...services.ai_service import call_groq_ai
+from ...services.summarizer import generate_chat_summary
 from ...services.task_classifier import extract_tasks_from_messages
 from ...services.reminder_service import (
     generate_context_based_suggestions,
     create_reminder_from_task,
 )
 from ...services.translation_service import translate_messages_batch
-
-class TextSummaryRequest(BaseModel):
-    text: str
 
 router = APIRouter()
 
@@ -83,18 +81,43 @@ async def moderate_messages(messages: List[FeatureRequest]):
     return JSONResponse(content=results)
 
 @router.post("/smart-replies")
-async def smart_replies(messages: List[FeatureRequest]):
-    """Generate smart replies"""
-    if not messages:
-        return {"suggestions": []}
+async def smart_replies(request: SmartRepliesRequest):
+    """Generate smart replies with specified tone.
     
-    last_msg = messages[-1]
+    Request body:
+    - messages: List of messages to generate replies for
+    - tone: Tone of the reply (auto, professional, casual, friendly, formal) - default: auto
+    """
+    if not request.messages:
+        return JSONResponse(content={"suggestions": []})
+    
+    last_msg = request.messages[-1]
+    tone = request.tone.lower()
+    
+    # Define tone instructions
+    tone_instructions = {
+        "auto": "Match the tone of the original message automatically.",
+        "professional": "Use a professional, business-appropriate tone. Be formal, clear, and respectful.",
+        "casual": "Use a casual, relaxed tone. Be friendly and conversational, like talking to a friend.",
+        "friendly": "Use a warm, friendly tone. Be approachable, positive, and engaging.",
+        "formal": "Use a formal, official tone. Be polite, structured, and maintain proper etiquette."
+    }
+    
+    tone_instruction = tone_instructions.get(tone, tone_instructions["auto"])
     
     prompt = f"""
     Generate 3 short, context-aware reply suggestions for the following message:
     "{last_msg.message}"
     
-    Return a JSON object: {{ "suggestions": ["Yes", "No", "maybe"] }}
+    Tone requirement: {tone_instruction}
+    
+    The replies should:
+    - Be contextually appropriate
+    - Match the specified tone: {tone}
+    - Be concise (1-2 sentences each)
+    - Be natural and conversational
+    
+    Return a JSON object: {{ "suggestions": ["Reply 1", "Reply 2", "Reply 3"] }}
     Return ONLY valid JSON.
     """
     
@@ -111,25 +134,30 @@ async def smart_replies(messages: List[FeatureRequest]):
 
 
 @router.post("/chat-summarize")
-async def summarize_chat(username: Optional[str] = None) -> JSONResponse:
+async def summarize_chat(request: SummarizeRequest) -> JSONResponse:
     """
     Generate chat summary.
 
-    Query parameters:
+    Request body:
     - username: Optional username to get personalized "What did I miss?" summary.
+    - total_messages: Optional number of recent messages to consider (default: 100)
     """
     try:
-        if username:
-            messages = chat_history.get_unread_messages(username)
+        if request.username:
+            messages = chat_history.get_unread_messages(request.username)
             if not messages:
                 messages = chat_history.get_all_messages()
         else:
             messages = chat_history.get_all_messages()
 
-        summary = generate_chat_summary(messages, username)
+        summary = generate_chat_summary(
+            messages, 
+            username=request.username, 
+            total_messages=request.total_messages
+        )
 
-        if username:
-            chat_history.mark_as_read(username)
+        if request.username:
+            chat_history.mark_as_read(request.username)
 
         return JSONResponse(content=summary)
 
@@ -296,33 +324,3 @@ async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse
         raise HTTPException(
             status_code=500, detail=f"Error translating messages: {str(e)}"
         ) from e
-
-@router.post("/transcribe")
-async def transcribe_voice_note(file: UploadFile = File(...)) -> JSONResponse:
-    """
-    Transcribe uploaded audio file.
-    """
-    try:
-        # We need to pass the file-like object to the service along with its filename
-        # so Groq/httpx knows the file type (e.g. "audio.mp3").
-        # We pass a tuple (filename, file_obj) which is supported by the library.
-        transcription_text = transcribe_audio((file.filename, file.file))
-        
-        if transcription_text.startswith("Error"):
-             raise HTTPException(status_code=500, detail=transcription_text)
-
-        return JSONResponse(content={"transcription": transcription_text})
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}") from e
-
-@router.post("/summarize-text")
-async def summarize_text(request: TextSummaryRequest) -> JSONResponse:
-    """
-    Summarize raw text (e.g. from transcription).
-    """
-    try:
-        result = generate_text_summary(request.text)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Summary failed: {str(e)}") from e
