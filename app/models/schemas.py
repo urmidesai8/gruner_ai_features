@@ -24,6 +24,12 @@ class TranslationRequest(BaseModel):
     target_language: str  # e.g. 'en', 'es', 'fr', 'de', 'hi', 'zh', 'ja'
 
 
+class SummarizeRequest(BaseModel):
+    """Request model for chat summarization"""
+    username: Optional[str] = None
+    total_messages: Optional[int] = 100  # Number of recent messages to consider (default: 100)
+
+
 class ReminderSuggestionRequest(BaseModel):
     """Request model for context-based reminder suggestions"""
     username: Optional[str] = None

@@ -14,7 +14,7 @@ load_dotenv()
 groq_client = Groq(api_key=settings.GROQ_API_KEY)
 
 
-def generate_chat_summary(messages: List[dict], username: Optional[str] = None) -> dict:
+def generate_chat_summary(messages: List[dict], username: Optional[str] = None, total_messages: int = 100) -> dict:
     """
     Generate a comprehensive chat summary using Groq Llama 3.1 8B instant model.
 
@@ -49,7 +49,11 @@ def generate_chat_summary(messages: List[dict], username: Optional[str] = None) 
             "participants": [],
         }
 
-    total_messages = len(chat_messages)
+    # Limit messages to the last N messages if total_messages is specified
+    if total_messages and total_messages > 0:
+        chat_messages = chat_messages[-total_messages:]
+    
+    total_messages_count = len(chat_messages)
     participants: Set[str] = {msg["sender"] for msg in chat_messages}
 
     # Format messages for the prompt
@@ -148,7 +152,7 @@ Return the JSON response now:"""
         result = {
             "summary": llm_summary.get(
                 "summary",
-                f"Chat summary: {total_messages} messages from "
+                f"Chat summary: {total_messages_count} messages from "
                 f"{len(participants)} participant(s): {', '.join(participants)}",
             ),
             "bullet_points": llm_summary.get("bullet_points", []),
@@ -157,7 +161,7 @@ Return the JSON response now:"""
             "unread_summary": llm_summary.get(
                 "unread_summary", "Summary generated successfully."
             ),
-            "total_messages": total_messages,
+            "total_messages": total_messages_count,
             "participants": list(participants),
         }
 
@@ -177,7 +181,7 @@ Return the JSON response now:"""
         print(f"Response was: {response_text}")
         return {
             "summary": (
-                f"Chat summary: {total_messages} messages from "
+                f"Chat summary: {total_messages_count} messages from "
                 f"{len(participants)} participant(s): {', '.join(participants)}"
             ),
             "bullet_points": [
@@ -187,14 +191,14 @@ Return the JSON response now:"""
             "key_decisions": ["Error parsing LLM response. Please try again."],
             "action_items": ["Error parsing LLM response. Please try again."],
             "unread_summary": "Error generating unread summary.",
-            "total_messages": total_messages,
+            "total_messages": total_messages_count,
             "participants": list(participants),
         }
     except Exception as e:
         print(f"Error calling Groq API: {e}")
         return {
             "summary": (
-                f"Chat summary: {total_messages} messages from "
+                f"Chat summary: {total_messages_count} messages from "
                 f"{len(participants)} participant(s): {', '.join(participants)}"
             ),
             "bullet_points": [
@@ -204,7 +208,7 @@ Return the JSON response now:"""
             "key_decisions": [f"Error: {str(e)}. Please check your GROQ_API_KEY."],
             "action_items": [f"Error: {str(e)}. Please check your GROQ_API_KEY."],
             "unread_summary": f"Error generating summary: {str(e)}",
-            "total_messages": total_messages,
+            "total_messages": total_messages_count,
             "participants": list(participants),
         }
 
@@ -261,9 +265,12 @@ Guidelines:
         response_text = completion.choices[0].message.content.strip()
         
         # JSON formatting safety
-        if response_text.startswith("```json"): response_text = response_text[7:]
-        if response_text.startswith("```"): response_text = response_text[3:]
-        if response_text.endswith("```"): response_text = response_text[:-3]
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.startswith("```"):
+            response_text = response_text[3:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
         
         llm_summary = json.loads(response_text.strip())
         

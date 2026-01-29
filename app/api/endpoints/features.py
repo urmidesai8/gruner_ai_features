@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from ...models.schemas import (
     FeatureRequest,
     chat_history,
+    SummarizeRequest,
     ReminderSuggestionRequest,
     ReminderCreateRequest,
     TranslationRequest,
@@ -111,25 +112,30 @@ async def smart_replies(messages: List[FeatureRequest]):
 
 
 @router.post("/chat-summarize")
-async def summarize_chat(username: Optional[str] = None) -> JSONResponse:
+async def summarize_chat(request: SummarizeRequest) -> JSONResponse:
     """
     Generate chat summary.
 
-    Query parameters:
+    Request body:
     - username: Optional username to get personalized "What did I miss?" summary.
+    - total_messages: Optional number of recent messages to consider (default: 100)
     """
     try:
-        if username:
-            messages = chat_history.get_unread_messages(username)
+        if request.username:
+            messages = chat_history.get_unread_messages(request.username)
             if not messages:
                 messages = chat_history.get_all_messages()
         else:
             messages = chat_history.get_all_messages()
 
-        summary = generate_chat_summary(messages, username)
+        summary = generate_chat_summary(
+            messages, 
+            username=request.username, 
+            total_messages=request.total_messages
+        )
 
-        if username:
-            chat_history.mark_as_read(username)
+        if request.username:
+            chat_history.mark_as_read(request.username)
 
         return JSONResponse(content=summary)
 

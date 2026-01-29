@@ -460,6 +460,11 @@
         <div class="modal-content">
             <span class="close" onclick="closeSummary()">&times;</span>
             <h2>Chat Summary</h2>
+            <div style="margin-bottom: 15px;">
+                <label for="summaryTotalMessages">Number of recent messages to summarize: </label>
+                <input type="number" id="summaryTotalMessages" value="100" min="1" max="1000" style="width: 100px; padding: 5px; margin-left: 10px;">
+                <small style="display: block; color: #666; margin-top: 5px;">Default: 100 (last 100 messages)</small>
+            </div>
             <div id="summaryLoading" style="display: none; text-align: center; padding: 20px;">Generating summary...
             </div>
             <div id="summaryResults"></div>
@@ -841,11 +846,20 @@
             try {
                 // Use User 1 as the username for summary (or could be configurable)
                 const username = user1Name;
-                const response = await fetch(`/api/features/chat-summarize?username=${encodeURIComponent(username)}`, {
+                const totalMessagesInput = document.getElementById('summaryTotalMessages');
+                const totalMessages = totalMessagesInput && totalMessagesInput.value ? parseInt(totalMessagesInput.value) : 100;
+                
+                const requestBody = {
+                    username: username,
+                    total_messages: totalMessages
+                };
+                
+                const response = await fetch('/api/features/chat-summarize', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    body: JSON.stringify(requestBody)
                 });
                 const data = await response.json();
 
@@ -855,7 +869,7 @@
                 }
 
                 const summary = data.summary || 'No summary available.';
-                const totalMessages = typeof data.total_messages === 'number' ? data.total_messages : 0;
+                const totalMessagesCount = typeof data.total_messages === 'number' ? data.total_messages : 0;
                 const participants = Array.isArray(data.participants) ? data.participants : [];
                 const bulletPoints = Array.isArray(data.bullet_points) ? data.bullet_points : [];
                 const keyDecisions = Array.isArray(data.key_decisions) ? data.key_decisions : [];
@@ -868,7 +882,7 @@
                     <div class="summary-section">
                         <h3>📋 Overview</h3>
                         <p>${summary}</p>
-                        <p><strong>Total Messages:</strong> ${totalMessages}</p>
+                        <p><strong>Total Messages:</strong> ${totalMessagesCount}</p>
                         <p><strong>Participants:</strong> ${participants.join(', ')}</p>
                     </div>
                     
