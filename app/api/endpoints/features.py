@@ -1,8 +1,7 @@
-from fastapi import APIRouter, HTTPException, File, UploadFile
+from fastapi import APIRouter, HTTPException
 from typing import List, Optional
 from fastapi.responses import JSONResponse
 import json
-from pydantic import BaseModel
 from ...models.schemas import (
     FeatureRequest,
     chat_history,
@@ -11,17 +10,14 @@ from ...models.schemas import (
     ReminderCreateRequest,
     TranslationRequest,
 )
-from ...services.ai_service import call_groq_ai, transcribe_audio
-from ...services.summarizer import generate_chat_summary, generate_text_summary
+from ...services.ai_service import call_groq_ai
+from ...services.summarizer import generate_chat_summary
 from ...services.task_classifier import extract_tasks_from_messages
 from ...services.reminder_service import (
     generate_context_based_suggestions,
     create_reminder_from_task,
 )
 from ...services.translation_service import translate_messages_batch
-
-class TextSummaryRequest(BaseModel):
-    text: str
 
 router = APIRouter()
 
@@ -302,33 +298,3 @@ async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse
         raise HTTPException(
             status_code=500, detail=f"Error translating messages: {str(e)}"
         ) from e
-
-@router.post("/transcribe")
-async def transcribe_voice_note(file: UploadFile = File(...)) -> JSONResponse:
-    """
-    Transcribe uploaded audio file.
-    """
-    try:
-        # We need to pass the file-like object to the service along with its filename
-        # so Groq/httpx knows the file type (e.g. "audio.mp3").
-        # We pass a tuple (filename, file_obj) which is supported by the library.
-        transcription_text = transcribe_audio((file.filename, file.file))
-        
-        if transcription_text.startswith("Error"):
-             raise HTTPException(status_code=500, detail=transcription_text)
-
-        return JSONResponse(content={"transcription": transcription_text})
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}") from e
-
-@router.post("/summarize-text")
-async def summarize_text(request: TextSummaryRequest) -> JSONResponse:
-    """
-    Summarize raw text (e.g. from transcription).
-    """
-    try:
-        result = generate_text_summary(request.text)
-        return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Summary failed: {str(e)}") from e
