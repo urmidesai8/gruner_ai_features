@@ -429,8 +429,8 @@
                     <option value="reminders">Smart Reminders</option>
                     <option value="translate">Language Translation</option>
                 </select>
-                <label for="translationLanguage"><strong>Language:</strong></label>
-                <select id="translationLanguage">
+                <label for="translationLanguage" id="translationLanguageLabel" style="display: none;"><strong>Language:</strong></label>
+                <select id="translationLanguage" style="display: none;">
                     <option value="en">English</option>
                     <option value="es">Spanish</option>
                     <option value="fr">French</option>
@@ -438,6 +438,14 @@
                     <option value="hi">Hindi</option>
                     <option value="zh">Chinese</option>
                     <option value="ja">Japanese</option>
+                </select>
+                <label for="replyTone" id="replyToneLabel" style="display: none;"><strong>Tone:</strong></label>
+                <select id="replyTone" style="display: none;">
+                    <option value="auto">Auto</option>
+                    <option value="professional">Professional</option>
+                    <option value="casual">Casual</option>
+                    <option value="friendly">Friendly</option>
+                    <option value="formal">Formal</option>
                 </select>
                 <button class="btn-ai" onclick="runAIFeature()">Run Analysis</button>
             </div>
@@ -620,6 +628,33 @@
         }
 
         // --- AI Features ---
+        
+        // Show/hide conditional controls based on selected feature
+        document.getElementById('featureSelect').addEventListener('change', function() {
+            const feature = this.value;
+            const translationLabel = document.getElementById('translationLanguageLabel');
+            const translationSelect = document.getElementById('translationLanguage');
+            const toneLabel = document.getElementById('replyToneLabel');
+            const toneSelect = document.getElementById('replyTone');
+            
+            // Show/hide translation language selector
+            if (feature === 'translate') {
+                translationLabel.style.display = 'inline';
+                translationSelect.style.display = 'inline';
+            } else {
+                translationLabel.style.display = 'none';
+                translationSelect.style.display = 'none';
+            }
+            
+            // Show/hide tone selector
+            if (feature === 'smart_replies') {
+                toneLabel.style.display = 'inline';
+                toneSelect.style.display = 'inline';
+            } else {
+                toneLabel.style.display = 'none';
+                toneSelect.style.display = 'none';
+            }
+        });
 
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
@@ -661,19 +696,30 @@
 
             try {
                 // Prepare payload: List of messages
-                const payload = chatMessages.map(m => ({
+                const messagesPayload = chatMessages.map(m => ({
                     id: m.id,
                     sender: m.sender,
                     message: m.message
                 }));
 
                 let url = `/api/features/${feature}`;
-                if (feature === 'smart_replies') url = '/api/features/smart-replies';
+                let requestBody;
+                
+                if (feature === 'smart_replies') {
+                    url = '/api/features/smart-replies';
+                    const tone = document.getElementById('replyTone').value || 'auto';
+                    requestBody = {
+                        messages: messagesPayload,
+                        tone: tone
+                    };
+                } else {
+                    requestBody = messagesPayload;
+                }
 
                 const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(requestBody)
                 });
 
                 const result = await response.json();

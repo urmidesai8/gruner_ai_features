@@ -17,6 +17,12 @@ class FeatureRequest(BaseModel):
     message: str
 
 
+class SmartRepliesRequest(BaseModel):
+    """Request model for smart replies generation"""
+    messages: List[FeatureRequest]
+    tone: str = "auto"  # auto, professional, casual, friendly, formal
+
+
 class TranslationRequest(BaseModel):
     """Request model for language translation"""
     id: str

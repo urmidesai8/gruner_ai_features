@@ -6,6 +6,7 @@ from ...models.schemas import (
     FeatureRequest,
     chat_history,
     SummarizeRequest,
+    SmartRepliesRequest,
     ReminderSuggestionRequest,
     ReminderCreateRequest,
     TranslationRequest,
@@ -80,18 +81,43 @@ async def moderate_messages(messages: List[FeatureRequest]):
     return JSONResponse(content=results)
 
 @router.post("/smart-replies")
-async def smart_replies(messages: List[FeatureRequest]):
-    """Generate smart replies"""
-    if not messages:
-        return {"suggestions": []}
+async def smart_replies(request: SmartRepliesRequest):
+    """Generate smart replies with specified tone.
     
-    last_msg = messages[-1]
+    Request body:
+    - messages: List of messages to generate replies for
+    - tone: Tone of the reply (auto, professional, casual, friendly, formal) - default: auto
+    """
+    if not request.messages:
+        return JSONResponse(content={"suggestions": []})
+    
+    last_msg = request.messages[-1]
+    tone = request.tone.lower()
+    
+    # Define tone instructions
+    tone_instructions = {
+        "auto": "Match the tone of the original message automatically.",
+        "professional": "Use a professional, business-appropriate tone. Be formal, clear, and respectful.",
+        "casual": "Use a casual, relaxed tone. Be friendly and conversational, like talking to a friend.",
+        "friendly": "Use a warm, friendly tone. Be approachable, positive, and engaging.",
+        "formal": "Use a formal, official tone. Be polite, structured, and maintain proper etiquette."
+    }
+    
+    tone_instruction = tone_instructions.get(tone, tone_instructions["auto"])
     
     prompt = f"""
     Generate 3 short, context-aware reply suggestions for the following message:
     "{last_msg.message}"
     
-    Return a JSON object: {{ "suggestions": ["Yes", "No", "maybe"] }}
+    Tone requirement: {tone_instruction}
+    
+    The replies should:
+    - Be contextually appropriate
+    - Match the specified tone: {tone}
+    - Be concise (1-2 sentences each)
+    - Be natural and conversational
+    
+    Return a JSON object: {{ "suggestions": ["Reply 1", "Reply 2", "Reply 3"] }}
     Return ONLY valid JSON.
     """
     
