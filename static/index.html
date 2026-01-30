@@ -391,10 +391,25 @@
             font-size: 0.9em;
         }
 
+        .auto-translation-box {
+            margin-top: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: #e8f5e9;
+            border-left: 3px solid #4caf50;
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+
         .translation-header {
             font-weight: bold;
             color: #558b2f;
             margin-bottom: 4px;
+        }
+
+        .auto-translation-box .translation-header {
+            font-size: 0.85em;
+            color: #2e7d32;
         }
 
         /* AI Toggle Switch Styles */
@@ -503,6 +518,19 @@
         <!-- USER 1 PANEL -->
         <div class="user-panel user-1-panel">
             <h2>User 1</h2>
+            <div id="user1LanguageContainer" style="display: none; margin-bottom: 10px;">
+                <label for="user1Language" style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate to:</label>
+                <select id="user1Language" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">-- No translation --</option>
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="hi">Hindi</option>
+                    <option value="zh">Chinese</option>
+                    <option value="ja">Japanese</option>
+                </select>
+            </div>
             <textarea id="input1" placeholder="Type as User 1..."></textarea>
             <button class="send-btn btn-user1" onclick="sendUser1()">Send >></button>
             <div id="status1" style="font-size:0.8em; color:gray; text-align:center;">Disconnected</div>
@@ -552,6 +580,19 @@
         <!-- USER 2 PANEL -->
         <div class="user-panel user-2-panel">
             <h2>User 2</h2>
+            <div id="user2LanguageContainer" style="display: none; margin-bottom: 10px;">
+                <label for="user2Language" style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate to:</label>
+                <select id="user2Language" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">-- No translation --</option>
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                    <option value="fr">French</option>
+                    <option value="de">German</option>
+                    <option value="hi">Hindi</option>
+                    <option value="zh">Chinese</option>
+                    <option value="ja">Japanese</option>
+                </select>
+            </div>
             <textarea id="input2" placeholder="Type as User 2..."></textarea>
             <button class="send-btn btn-user2" onclick="sendUser2()">
                 << Send</button>
@@ -666,6 +707,8 @@
             const statusText = document.getElementById('aiStatusText');
             const featureSelect = document.getElementById('featureSelect');
             const runButton = document.querySelector('.btn-ai');
+            const user1LangContainer = document.getElementById('user1LanguageContainer');
+            const user2LangContainer = document.getElementById('user2LanguageContainer');
             
             if (toggle) {
                 toggle.checked = aiEnabled;
@@ -674,6 +717,24 @@
             if (statusText) {
                 statusText.textContent = aiEnabled ? 'ON' : 'OFF';
                 statusText.style.color = aiEnabled ? '#4caf50' : '#f44336';
+            }
+            
+            // Show/hide language dropdowns based on AI state
+            if (user1LangContainer) {
+                user1LangContainer.style.display = aiEnabled ? 'block' : 'none';
+            }
+            if (user2LangContainer) {
+                user2LangContainer.style.display = aiEnabled ? 'block' : 'none';
+            }
+            
+            // If AI is off, reset language selections and remove translations
+            if (!aiEnabled) {
+                const user1Lang = document.getElementById('user1Language');
+                const user2Lang = document.getElementById('user2Language');
+                if (user1Lang) user1Lang.value = '';
+                if (user2Lang) user2Lang.value = '';
+                // Remove all existing auto-translations
+                document.querySelectorAll('.auto-translation-box').forEach(el => el.remove());
             }
             
             // Disable/enable AI features (except summary)
@@ -811,13 +872,19 @@
 
             // Keep track for AI analysis
             // Note: ai_enabled is tracked on backend, but we'll filter on frontend too
-            chatMessages.push({
+            const messageObj = {
                 id: div.dataset.id,
                 sender: msgData.sender,
                 message: msgData.message,
                 element: div,
                 ai_enabled: msgData.ai_enabled !== undefined ? msgData.ai_enabled : aiEnabled
-            });
+            };
+            chatMessages.push(messageObj);
+
+            // Auto-translate if AI is enabled and user has selected a language
+            if (aiEnabled && msgData.ai_enabled !== false) {
+                autoTranslateMessage(messageObj);
+            }
         }
 
         function sendUser1() {
@@ -1703,12 +1770,133 @@
             if (event.target == transcriptionModal) transcriptionModal.style.display = 'none';
         }
 
+        // Auto-translate message based on receiving user's language preference
+        async function autoTranslateMessage(messageObj) {
+            const isUser1Sender = messageObj.sender === user1Name;
+            const receivingUser = isUser1Sender ? 'user2' : 'user1';
+            const receivingUserName = isUser1Sender ? user2Name : user1Name;
+            const langSelect = document.getElementById(`${receivingUser}Language`);
+            
+            if (!langSelect || !langSelect.value) {
+                return; // No language selected for receiving user
+            }
+
+            const targetLang = langSelect.value;
+            const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
+
+            // Check if AI is still enabled
+            if (!aiEnabled) {
+                return;
+            }
+
+            try {
+                const payload = [{
+                    id: messageObj.id,
+                    text: messageObj.message,
+                    target_language: targetLang
+                }];
+
+                const response = await fetch('/api/features/translate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    // Silently fail for auto-translation
+                    return;
+                }
+
+                const data = await response.json();
+                const translations = data && data.translations ? data.translations : {};
+                const translation = translations[messageObj.id];
+
+                if (translation && translation.translated_text) {
+                    // Remove any existing auto-translation for this message
+                    const existing = messageObj.element.querySelector('.auto-translation-box');
+                    if (existing) {
+                        existing.remove();
+                    }
+
+                    const translationDiv = document.createElement('div');
+                    translationDiv.className = 'auto-translation-box';
+                    translationDiv.innerHTML = `
+                        <div class="translation-header">${receivingUserName} (${targetLangLabel})</div>
+                        <div class="translation-body">${escapeHtml(translation.translated_text)}</div>
+                    `;
+
+                    messageObj.element.appendChild(translationDiv);
+                }
+            } catch (error) {
+                // Silently fail for auto-translation
+                console.error('Auto-translation error:', error);
+            }
+        }
+
+        // Retranslate all messages from a specific sender for a receiving user
+        async function retranslateMessagesForUser(senderName, receivingUser) {
+            const langSelect = document.getElementById(`${receivingUser}Language`);
+            if (!langSelect || !langSelect.value || !aiEnabled) {
+                return;
+            }
+            
+            // senderName is the user who sent the messages (user1 or user2)
+            // receivingUser is the user who wants to see translations (user1 or user2)
+            const sender = senderName === 'user1' ? user1Name : user2Name;
+            const messagesToTranslate = chatMessages.filter(m => 
+                m.sender === sender && 
+                m.ai_enabled !== false
+            );
+            
+            for (const msg of messagesToTranslate) {
+                await autoTranslateMessage(msg);
+            }
+        }
+        
+        // Remove all auto-translations for a specific user
+        function removeAutoTranslationsForUser(receivingUser) {
+            // receivingUser is user1 or user2 - we need to remove translations
+            // for messages that were translated TO this user's language preference
+            // So if receivingUser is user1, we remove translations from messages sent by user2
+            // If receivingUser is user2, we remove translations from messages sent by user1
+            const sender = receivingUser === 'user1' ? user2Name : user1Name;
+            const messagesFromSender = chatMessages.filter(m => m.sender === sender);
+            
+            messagesFromSender.forEach(msg => {
+                const existing = msg.element.querySelector('.auto-translation-box');
+                if (existing) {
+                    existing.remove();
+                }
+            });
+        }
+
         // Initialize AI status and connect
         initializeAIStatus();
         connect();
         
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
+        
+        // Add event listeners for language selection changes
+        document.getElementById('user1Language').addEventListener('change', function() {
+            if (aiEnabled && this.value) {
+                // Re-translate all messages from User 2
+                retranslateMessagesForUser('user2', 'user1');
+            } else {
+                // Remove all auto-translations for User 1
+                removeAutoTranslationsForUser('user1');
+            }
+        });
+        
+        document.getElementById('user2Language').addEventListener('change', function() {
+            if (aiEnabled && this.value) {
+                // Re-translate all messages from User 1
+                retranslateMessagesForUser('user1', 'user2');
+            } else {
+                // Remove all auto-translations for User 2
+                removeAutoTranslationsForUser('user2');
+            }
+        });
 
     </script>
 </body>
