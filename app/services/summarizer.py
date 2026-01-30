@@ -265,12 +265,9 @@ Guidelines:
         response_text = completion.choices[0].message.content.strip()
         
         # JSON formatting safety
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        if response_text.startswith("```"):
-            response_text = response_text[3:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
+        if response_text.startswith("```json"): response_text = response_text[7:]
+        if response_text.startswith("```"): response_text = response_text[3:]
+        if response_text.endswith("```"): response_text = response_text[:-3]
         
         llm_summary = json.loads(response_text.strip())
         
