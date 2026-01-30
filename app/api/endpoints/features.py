@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, File, UploadFile
-from typing import List, Optional
+from typing import List, Optional, Dict
 from fastapi.responses import JSONResponse
 import json
 from pydantic import BaseModel
@@ -11,10 +11,12 @@ from ...models.schemas import (
     ReminderSuggestionRequest,
     ReminderCreateRequest,
     TranslationRequest,
+    TextTranslationRequest,
 )
 from ...services.ai_service import call_groq_ai, transcribe_audio
 from ...services.summarizer import generate_chat_summary, generate_text_summary
 from ...services.task_classifier import extract_tasks_from_messages
+from ...services.translation_service import translate_messages_batch, translate_text
 from ...services.reminder_service import (
     generate_context_based_suggestions,
     create_reminder_from_task,
@@ -290,6 +292,29 @@ async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(
             status_code=500, detail=f"Error classifying tasks: {str(e)}"
+        ) from e
+
+
+@router.post("/translate")
+async def translate_chat_messages(request: List[Dict]) -> JSONResponse:
+    try:
+        result = translate_messages_batch(request)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Translation failed: {str(e)}"
+        ) from e
+
+
+@router.post("/translate-text")
+async def translate_text_endpoint(request: TextTranslationRequest) -> JSONResponse:
+    """Translate raw text into a target language."""
+    try:
+        result = translate_text(request.text, request.target_language)
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Translation failed: {str(e)}"
         ) from e
 
 

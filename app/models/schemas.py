@@ -31,6 +31,12 @@ class TranslationRequest(BaseModel):
     target_language: str  # e.g. 'en', 'es', 'fr', 'de', 'hi', 'zh', 'ja'
 
 
+class TextTranslationRequest(BaseModel):
+    """Request model for generic text translation (e.g. transcripts)"""
+    text: str
+    target_language: str
+
+
 class SummarizeRequest(BaseModel):
     """Request model for chat summarization"""
     username: Optional[str] = None
