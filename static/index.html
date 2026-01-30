@@ -4,7 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dual-User AI Chat</title>
+    <title>AI Dual-User Chat Simulation</title>
+    <!-- Material Icons -->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -381,6 +383,52 @@
             background: #1976D2;
         }
 
+        .btn-icon {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            margin-right: 5px;
+            color: #555;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .btn-icon .material-icons-outlined {
+            font-size: 20px;
+        }
+
+        .btn-icon:hover {
+            background: #f0f0f0;
+            color: #2196F3;
+            border-color: #2196F3;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-icon.recording {
+            background: #ffcdd2;
+            border-color: #f44336;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                box-shadow: 0 0 0 0 rgba(244, 67, 54, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 10px rgba(244, 67, 54, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(244, 67, 54, 0);
+            }
+        }
+
         /* Translation styles */
         .translation-box {
             margin-top: 8px;
@@ -450,15 +498,15 @@
             border-radius: 50%;
         }
 
-        input:checked + .toggle-slider {
+        input:checked+.toggle-slider {
             background-color: #4caf50;
         }
 
-        input:checked + .toggle-slider:before {
+        input:checked+.toggle-slider:before {
             transform: translateX(26px);
         }
 
-        input:disabled + .toggle-slider {
+        input:disabled+.toggle-slider {
             opacity: 0.6;
             cursor: not-allowed;
         }
@@ -519,8 +567,11 @@
         <div class="user-panel user-1-panel">
             <h2>User 1</h2>
             <div id="user1LanguageContainer" style="display: none; margin-bottom: 10px;">
-                <label for="user1Language" style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate to:</label>
-                <select id="user1Language" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                <label for="user1Language"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate
+                    to:</label>
+                <select id="user1Language"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
                     <option value="">-- No translation --</option>
                     <option value="en">English</option>
                     <option value="es">Spanish</option>
@@ -532,6 +583,18 @@
                 </select>
             </div>
             <textarea id="input1" placeholder="Type as User 1..."></textarea>
+            <div class="audio-controls" style="margin-bottom: 5px; display: flex; gap: 5px;">
+                <button class="btn-icon" onclick="toggleRecording('user1')" title="Record Audio">
+                    <span class="material-icons-outlined">mic</span>
+                </button>
+                <button class="btn-icon" onclick="triggerFileUpload('user1')" title="Upload Audio">
+                    <span class="material-icons-outlined">upload_file</span>
+                </button>
+                <input type="file" id="fileInput1" accept="audio/*" style="display: none;"
+                    onchange="handleFileUpload(this, 'user1')">
+                <span id="recordingStatus1"
+                    style="font-size: 0.8em; color: red; display: none; align-self: center;">Recording...</span>
+            </div>
             <button class="send-btn btn-user1" onclick="sendUser1()">Send >></button>
             <div id="status1" style="font-size:0.8em; color:gray; text-align:center;">Disconnected</div>
         </div>
@@ -582,8 +645,11 @@
         <div class="user-panel user-2-panel">
             <h2>User 2</h2>
             <div id="user2LanguageContainer" style="display: none; margin-bottom: 10px;">
-                <label for="user2Language" style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate to:</label>
-                <select id="user2Language" style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                <label for="user2Language"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate
+                    to:</label>
+                <select id="user2Language"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
                     <option value="">-- No translation --</option>
                     <option value="en">English</option>
                     <option value="es">Spanish</option>
@@ -595,6 +661,18 @@
                 </select>
             </div>
             <textarea id="input2" placeholder="Type as User 2..."></textarea>
+            <div class="audio-controls" style="margin-bottom: 5px; display: flex; gap: 5px;">
+                <button class="btn-icon" onclick="toggleRecording('user2')" title="Record Audio">
+                    <span class="material-icons-outlined">mic</span>
+                </button>
+                <button class="btn-icon" onclick="triggerFileUpload('user2')" title="Upload Audio">
+                    <span class="material-icons-outlined">upload_file</span>
+                </button>
+                <input type="file" id="fileInput2" accept="audio/*" style="display: none;"
+                    onchange="handleFileUpload(this, 'user2')">
+                <span id="recordingStatus2"
+                    style="font-size: 0.8em; color: red; display: none; align-self: center;">Recording...</span>
+            </div>
             <button class="send-btn btn-user2" onclick="sendUser2()">
                 << Send</button>
                     <div id="status2" style="font-size:0.8em; color:gray; text-align:center;">Disconnected</div>
@@ -699,7 +777,7 @@
 
         // Global store for messages to easily update UI
         let chatMessages = [];
-        
+
         // AI state tracking
         let aiEnabled = true;
 
@@ -709,7 +787,7 @@
             div.textContent = text;
             return div.innerHTML;
         }
-        
+
         // Initialize AI status on page load
         async function initializeAIStatus() {
             try {
@@ -721,7 +799,7 @@
                 console.error('Error fetching AI status:', error);
             }
         }
-        
+
         // Update AI toggle UI
         function updateAIToggleUI() {
             const toggle = document.getElementById('aiToggle');
@@ -730,16 +808,16 @@
             const runButton = document.querySelector('.btn-ai');
             const user1LangContainer = document.getElementById('user1LanguageContainer');
             const user2LangContainer = document.getElementById('user2LanguageContainer');
-            
+
             if (toggle) {
                 toggle.checked = aiEnabled;
             }
-            
+
             if (statusText) {
                 statusText.textContent = aiEnabled ? 'ON' : 'OFF';
                 statusText.style.color = aiEnabled ? '#4caf50' : '#f44336';
             }
-            
+
             // Show/hide language dropdowns based on AI state
             if (user1LangContainer) {
                 user1LangContainer.style.display = aiEnabled ? 'block' : 'none';
@@ -747,7 +825,7 @@
             if (user2LangContainer) {
                 user2LangContainer.style.display = aiEnabled ? 'block' : 'none';
             }
-            
+
             // If AI is off, reset language selections and remove translations
             if (!aiEnabled) {
                 const user1Lang = document.getElementById('user1Language');
@@ -757,7 +835,7 @@
                 // Remove all existing auto-translations
                 document.querySelectorAll('.auto-translation-box').forEach(el => el.remove());
             }
-            
+
             // Disable/enable AI features (except summary)
             if (featureSelect) {
                 const options = featureSelect.querySelectorAll('option');
@@ -766,13 +844,13 @@
                         option.disabled = !aiEnabled;
                     }
                 });
-                
+
                 // If current selection is disabled, reset to none
                 if (!aiEnabled && featureSelect.value !== 'none' && featureSelect.value !== 'summary') {
                     featureSelect.value = 'none';
                 }
             }
-            
+
             // Update run button
             if (runButton) {
                 if (!aiEnabled && featureSelect && featureSelect.value !== 'none' && featureSelect.value !== 'summary') {
@@ -786,23 +864,23 @@
                 }
             }
         }
-        
+
         // Toggle AI state
         async function toggleAI() {
             const toggle = document.getElementById('aiToggle');
             const newState = toggle.checked;
-            
+
             try {
                 const response = await fetch('/api/features/ai-toggle', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled: newState })
                 });
-                
+
                 const data = await response.json();
                 aiEnabled = data.ai_enabled;
                 updateAIToggleUI();
-                
+
                 // Show notification
                 const statusEl = document.getElementById('aiStatus');
                 if (statusEl) {
@@ -871,6 +949,24 @@
             }
         }
 
+        function renderMessageContent(text, msgId) {
+            if (text.startsWith('[AUDIO]: ')) {
+                const url = text.substring(9);
+                const filename = url.split('/').pop();
+                const actionId = 'audio-actions-' + msgId;
+
+                return `
+                    <audio controls src="${url}" style="width: 200px;"></audio>
+                    <div style="margin-top: 5px;">
+                        <button class="suggestion-btn" onclick="transcribeAudioMsg('${filename}', '${actionId}')">Transcribe</button>
+                        <button class="suggestion-btn" onclick="summarizeAudioMsg('${filename}', '${actionId}')">Summary</button>
+                    </div>
+                    <div id="${actionId}"></div>
+                `;
+            }
+            return escapeHtml(text);
+        }
+
         function displayMessage(msgData) {
             // Avoid duplicates if both sockets receive notifications (e.g. system messages)
             // For simple chat messages between 2 people, it's distinct.
@@ -884,7 +980,9 @@
 
             div.innerHTML = `
                 <div class="message-header">${msgData.sender}</div>
-                <div class="message-body">${msgData.message}</div>
+                <div class="message-body">
+                    ${renderMessageContent(msgData.message, div.dataset.id)}
+                </div>
                 <div class="ai-tags"></div>
             `;
 
@@ -908,20 +1006,18 @@
             }
         }
 
-        function sendUser1() {
+        async function sendUser1() {
             const input = document.getElementById('input1');
             const text = input.value.trim();
             if (!text) return;
 
             // Send via WS - Do NOT display locally, wait for WS echo/broadcast to other user
-            // Since we have both User 1 and User 2 sockets open:
-            // User 1 sends -> Backend -> User 2 receives -> We display from User 2's socket event.
             ws1.send(JSON.stringify({ message: text }));
 
             input.value = '';
         }
 
-        function sendUser2() {
+        async function sendUser2() {
             const input = document.getElementById('input2');
             const text = input.value.trim();
             if (!text) return;
@@ -930,6 +1026,163 @@
             ws2.send(JSON.stringify({ message: text }));
 
             input.value = '';
+        }
+
+        // --- Audio Messaging Functions ---
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false; // Simple state tracking (per user would be better but simple for now)
+        let currentRecordingUser = null;
+
+        async function toggleRecording(user) {
+            const statusEl = document.getElementById(user === 'user1' ? 'recordingStatus1' : 'recordingStatus2');
+            const btn = document.querySelector(`.user-${user === 'user1' ? '1' : '2'}-panel .btn-icon[title="Record Audio"]`);
+
+            if (!isRecording) {
+                // Start Recording
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+                    currentRecordingUser = user;
+
+                    mediaRecorder.ondataavailable = event => {
+                        audioChunks.push(event.data);
+                    };
+
+                    mediaRecorder.onstop = async () => {
+                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                        // Create a file from blob
+                        const file = new File([audioBlob], "recording.webm", { type: 'audio/webm' });
+                        await uploadAudioFile(file, user);
+
+                        // Reset UI
+                        statusEl.style.display = 'none';
+                        btn.classList.remove('recording');
+                        isRecording = false;
+                        currentRecordingUser = null;
+
+                        // Stop all tracks
+                        stream.getTracks().forEach(track => track.stop());
+                    };
+
+                    mediaRecorder.start();
+                    isRecording = true;
+                    statusEl.style.display = 'inline';
+                    btn.classList.add('recording');
+
+                } catch (err) {
+                    console.error("Error accessing microphone:", err);
+                    alert("Could not access microphone.");
+                }
+            } else {
+                // Stop Recording
+                if (currentRecordingUser !== user) {
+                    alert("Another recording is in progress.");
+                    return;
+                }
+                mediaRecorder.stop();
+            }
+        }
+
+        function triggerFileUpload(user) {
+            document.getElementById(user === 'user1' ? 'fileInput1' : 'fileInput2').click();
+        }
+
+        async function handleFileUpload(input, user) {
+            if (input.files && input.files[0]) {
+                await uploadAudioFile(input.files[0], user);
+                input.value = ''; // Reset
+            }
+        }
+
+        async function uploadAudioFile(file, user) {
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/features/upload-audio', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Upload failed');
+
+                const data = await response.json();
+                const audioUrl = data.url;
+
+                // Send as special formatted message: [AUDIO]: URL
+                const message = `[AUDIO]: ${audioUrl}`;
+
+                if (user === 'user1') {
+                    ws1.send(JSON.stringify({ message: message }));
+                } else {
+                    ws2.send(JSON.stringify({ message: message }));
+                }
+
+            } catch (error) {
+                console.error("Error uploading audio:", error);
+                alert("Failed to send audio.");
+            }
+        }
+
+        async function transcribeAudioMsg(filename, elementId) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = 'Transcribing...';
+
+            try {
+                const response = await fetch('/api/features/transcribe-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: filename })
+                });
+
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || 'Transcription failed');
+
+                container.innerHTML = `<div style="margin-top:5px; padding:5px; background:#f0f0f0; border-radius:4px;"><strong>Transcript:</strong> ${escapeHtml(data.transcription)}</div>`;
+
+            } catch (error) {
+                container.innerHTML = `<span style="color:red">Error: ${error.message}</span>`;
+            }
+        }
+
+        async function summarizeAudioMsg(filename, elementId) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = 'Summarizing...';
+
+            try {
+                // First Transcribe
+                const transResponse = await fetch('/api/features/transcribe-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: filename })
+                });
+                const transData = await transResponse.json();
+                if (!transResponse.ok) throw new Error(transData.detail || 'Transcription failed');
+
+                const text = transData.transcription;
+
+                // Then Summarize
+                const sumResponse = await fetch('/api/features/summarize-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: text })
+                });
+
+                const sumData = await sumResponse.json();
+                if (!sumResponse.ok) throw new Error(sumData.detail || 'Summarization failed');
+
+                container.innerHTML = `
+                    <div style="margin-top:5px; padding:5px; background:#fff3e0; border-radius:4px;">
+                        <strong>Summary:</strong>
+                        <p>${escapeHtml(sumData.summary)}</p>
+                    </div>
+                 `;
+
+            } catch (error) {
+                container.innerHTML = `<span style="color:red">Error: ${error.message}</span>`;
+            }
         }
 
         // --- AI Features ---
@@ -964,7 +1217,7 @@
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
             const statusEl = document.getElementById('aiStatus');
-            
+
             // Check AI state for non-summary features
             if (feature !== 'none' && feature !== 'summary' && !aiEnabled) {
                 alert('AI features are currently disabled. Please enable AI to use this feature.');
@@ -1026,7 +1279,7 @@
                 if (feature !== 'summary') {
                     messagesToUse = chatMessages.filter(m => m.ai_enabled !== false);
                 }
-                
+
                 // Prepare payload: List of messages
                 const messagesPayload = messagesToUse.map(m => ({
                     id: m.id,
@@ -1278,7 +1531,7 @@
                 alert("No messages to analyze for tasks.");
                 return;
             }
-            
+
             // Check AI state
             if (!aiEnabled) {
                 alert('AI features are currently disabled. Please enable AI to use task extraction.');
@@ -1370,7 +1623,7 @@
                 alert("No messages to translate.");
                 return;
             }
-            
+
             // Check AI state
             if (!aiEnabled) {
                 alert('AI features are currently disabled. Please enable AI to use translation.');
@@ -1455,7 +1708,7 @@
                 alert("No messages to analyze for reminders.");
                 return;
             }
-            
+
             // Check AI state
             if (!aiEnabled) {
                 alert('AI features are currently disabled. Please enable AI to use reminder suggestions.');
@@ -1840,7 +2093,7 @@
             const receivingUser = isUser1Sender ? 'user2' : 'user1';
             const receivingUserName = isUser1Sender ? user2Name : user1Name;
             const langSelect = document.getElementById(`${receivingUser}Language`);
-            
+
             if (!langSelect || !langSelect.value) {
                 return; // No language selected for receiving user
             }
@@ -1903,20 +2156,20 @@
             if (!langSelect || !langSelect.value || !aiEnabled) {
                 return;
             }
-            
+
             // senderName is the user who sent the messages (user1 or user2)
             // receivingUser is the user who wants to see translations (user1 or user2)
             const sender = senderName === 'user1' ? user1Name : user2Name;
-            const messagesToTranslate = chatMessages.filter(m => 
-                m.sender === sender && 
+            const messagesToTranslate = chatMessages.filter(m =>
+                m.sender === sender &&
                 m.ai_enabled !== false
             );
-            
+
             for (const msg of messagesToTranslate) {
                 await autoTranslateMessage(msg);
             }
         }
-        
+
         // Remove all auto-translations for a specific user
         function removeAutoTranslationsForUser(receivingUser) {
             // receivingUser is user1 or user2 - we need to remove translations
@@ -1925,7 +2178,7 @@
             // If receivingUser is user2, we remove translations from messages sent by user1
             const sender = receivingUser === 'user1' ? user2Name : user1Name;
             const messagesFromSender = chatMessages.filter(m => m.sender === sender);
-            
+
             messagesFromSender.forEach(msg => {
                 const existing = msg.element.querySelector('.auto-translation-box');
                 if (existing) {
@@ -1937,12 +2190,12 @@
         // Initialize AI status and connect
         initializeAIStatus();
         connect();
-        
+
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
-        
+
         // Add event listeners for language selection changes
-        document.getElementById('user1Language').addEventListener('change', function() {
+        document.getElementById('user1Language').addEventListener('change', function () {
             if (aiEnabled && this.value) {
                 // Re-translate all messages from User 2
                 retranslateMessagesForUser('user2', 'user1');
@@ -1951,8 +2204,8 @@
                 removeAutoTranslationsForUser('user1');
             }
         });
-        
-        document.getElementById('user2Language').addEventListener('change', function() {
+
+        document.getElementById('user2Language').addEventListener('change', function () {
             if (aiEnabled && this.value) {
                 // Re-translate all messages from User 1
                 retranslateMessagesForUser('user1', 'user2');
