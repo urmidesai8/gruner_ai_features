@@ -430,7 +430,8 @@
                     <option value="translate">Language Translation</option>
                     <option value="transcribe">Audio Transcription</option>
                 </select>
-                <label for="translationLanguage" id="translationLanguageLabel" style="display: none;"><strong>Language:</strong></label>
+                <label for="translationLanguage" id="translationLanguageLabel"
+                    style="display: none;"><strong>Language:</strong></label>
                 <select id="translationLanguage" style="display: none;">
                     <option value="en">English</option>
                     <option value="es">Spanish</option>
@@ -470,7 +471,8 @@
             <h2>Chat Summary</h2>
             <div style="margin-bottom: 15px;">
                 <label for="summaryTotalMessages">Number of recent messages to summarize: </label>
-                <input type="number" id="summaryTotalMessages" value="100" min="1" max="1000" style="width: 100px; padding: 5px; margin-left: 10px;">
+                <input type="number" id="summaryTotalMessages" value="100" min="1" max="1000"
+                    style="width: 100px; padding: 5px; margin-left: 10px;">
                 <small style="display: block; color: #666; margin-top: 5px;">Default: 100 (last 100 messages)</small>
             </div>
             <div id="summaryLoading" style="display: none; text-align: center; padding: 20px;">Generating summary...
@@ -513,18 +515,37 @@
             <div style="margin-bottom: 20px; text-align: center;">
                 <input type="file" id="audioInput" accept="audio/*" style="display: block; margin: 10px auto;">
                 <button class="btn-ai" onclick="uploadForTranscription()">Transcribe Now</button>
-                <button id="btnSummarizeTranscript" class="btn-ai"
-                    style="display:none; margin-left:10px; background-color: #ff9800;"
-                    onclick="generateTranscriptSummary()">Generate Summary</button>
+                <div id="transcriptionActions" style="display:none; margin-top: 10px;">
+                    <button class="btn-ai" style="background-color: #ff9800;"
+                        onclick="generateTranscriptSummary()">Generate Summary</button>
+
+                    <select id="transcriptLangSelect" style="padding: 8px; border-radius: 5px; margin-left: 10px;">
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="hi">Hindi</option>
+                        <option value="ja">Japanese</option>
+                        <option value="zh">Chinese</option>
+                        <option value="en">English</option>
+                    </select>
+                    <button class="btn-ai" style="background-color: #2196F3; margin-left: 5px;"
+                        onclick="translateTranscript()">Translate</button>
+                </div>
             </div>
             <div id="transcriptionLoading" style="display: none; text-align: center; padding: 20px;">Transcribing audio
                 file...</div>
             <div id="transcriptionResults"
                 style="white-space: pre-wrap; background: #f9f9f9; padding: 15px; border-radius: 5px; margin-top: 10px; min-height: 100px;">
             </div>
+            <!-- Translation Result -->
+            <div id="transcriptionTranslationResult"
+                style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;"></div>
+            <!-- Summary Result -->
             <div id="transcriptionSummaryResult"
                 style="margin-top: 20px; border-top: 1px solid #ccc; padding-top: 10px;"></div>
+
         </div>
+    </div>
     </div>
     </div>
 
@@ -654,15 +675,15 @@
         }
 
         // --- AI Features ---
-        
+
         // Show/hide conditional controls based on selected feature
-        document.getElementById('featureSelect').addEventListener('change', function() {
+        document.getElementById('featureSelect').addEventListener('change', function () {
             const feature = this.value;
             const translationLabel = document.getElementById('translationLanguageLabel');
             const translationSelect = document.getElementById('translationLanguage');
             const toneLabel = document.getElementById('replyToneLabel');
             const toneSelect = document.getElementById('replyTone');
-            
+
             // Show/hide translation language selector
             if (feature === 'translate') {
                 translationLabel.style.display = 'inline';
@@ -671,7 +692,7 @@
                 translationLabel.style.display = 'none';
                 translationSelect.style.display = 'none';
             }
-            
+
             // Show/hide tone selector
             if (feature === 'smart_replies') {
                 toneLabel.style.display = 'inline';
@@ -745,7 +766,7 @@
 
                 let url = `/api/features/${feature}`;
                 let requestBody;
-                
+
                 if (feature === 'smart_replies') {
                     url = '/api/features/smart-replies';
                     const tone = document.getElementById('replyTone').value || 'auto';
@@ -894,12 +915,12 @@
                 const username = user1Name;
                 const totalMessagesInput = document.getElementById('summaryTotalMessages');
                 const totalMessages = totalMessagesInput && totalMessagesInput.value ? parseInt(totalMessagesInput.value) : 100;
-                
+
                 const requestBody = {
                     username: username,
                     total_messages: totalMessages
                 };
-                
+
                 const response = await fetch('/api/features/chat-summarize', {
                     method: 'POST',
                     headers: {
@@ -1391,8 +1412,8 @@
 
                 results.textContent = data.transcription;
 
-                // Show the "Generate Summary" button
-                document.getElementById('btnSummarizeTranscript').style.display = 'inline-block';
+                // Show the actions area (Summary + Translate)
+                document.getElementById('transcriptionActions').style.display = 'block';
 
             } catch (error) {
                 loading.style.display = 'none';
@@ -1449,6 +1470,49 @@
 
             } catch (error) {
                 results.innerHTML = `<p style="color:red">Error generating summary: ${error.message}</p>`;
+            }
+        }
+
+        async function translateTranscript() {
+            const transcriptText = document.getElementById('transcriptionResults').textContent;
+            if (!transcriptText) return;
+
+            const langSelect = document.getElementById('transcriptLangSelect');
+            const targetLang = langSelect.value;
+            const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
+
+            const results = document.getElementById('transcriptionTranslationResult');
+
+            // Show loading state
+            results.innerHTML = `<div style="text-align:center; padding:10px;">Translating to ${targetLangLabel}...</div>`;
+
+            try {
+                const response = await fetch('/api/features/translate-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: transcriptText,
+                        target_language: targetLang
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Translation failed');
+                }
+
+                let html = `
+                    <div class="summary-section">
+                        <h3>🌍 Translation (${targetLangLabel})</h3>
+                        <p style="white-space: pre-wrap;">${escapeHtml(data.translated_text)}</p>
+                        <p><small>Detected Language: ${data.detected_language}</small></p>
+                    </div>
+                `;
+                results.innerHTML = html;
+
+            } catch (error) {
+                results.innerHTML = `<p style="color:red">Error translation: ${error.message}</p>`;
             }
         }
 
