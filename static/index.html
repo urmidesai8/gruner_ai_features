@@ -396,10 +396,106 @@
             color: #558b2f;
             margin-bottom: 4px;
         }
+
+        /* AI Toggle Switch Styles */
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .toggle-slider {
+            background-color: #4caf50;
+        }
+
+        input:checked + .toggle-slider:before {
+            transform: translateX(26px);
+        }
+
+        input:disabled + .toggle-slider {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .ai-disabled {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+
+        /* AI Toggle in Top Right Corner */
+        .ai-toggle-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 15px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            z-index: 1000;
+        }
+
+        .ai-toggle-container label {
+            margin: 0;
+            font-weight: bold;
+            color: #333;
+            font-size: 0.9em;
+        }
+
+        .ai-toggle-container #aiStatusText {
+            font-size: 0.9em;
+            font-weight: bold;
+            min-width: 35px;
+        }
     </style>
 </head>
 
 <body>
+
+    <!-- AI Toggle in Top Right Corner -->
+    <div class="ai-toggle-container">
+        <label for="aiToggle">
+            <span id="aiStatusLabel">AI Features: </span>
+        </label>
+        <label class="toggle-switch">
+            <input type="checkbox" id="aiToggle" checked>
+            <span class="toggle-slider"></span>
+        </label>
+        <span id="aiStatusText" style="color: #4caf50; font-weight: bold;">ON</span>
+    </div>
 
     <h1>Dual-User Simulation & AI Features</h1>
 
@@ -541,12 +637,105 @@
 
         // Global store for messages to easily update UI
         let chatMessages = [];
+        
+        // AI state tracking
+        let aiEnabled = true;
 
         // Utility function to escape HTML
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // Initialize AI status on page load
+        async function initializeAIStatus() {
+            try {
+                const response = await fetch('/api/features/ai-status');
+                const data = await response.json();
+                aiEnabled = data.ai_enabled;
+                updateAIToggleUI();
+            } catch (error) {
+                console.error('Error fetching AI status:', error);
+            }
+        }
+        
+        // Update AI toggle UI
+        function updateAIToggleUI() {
+            const toggle = document.getElementById('aiToggle');
+            const statusText = document.getElementById('aiStatusText');
+            const featureSelect = document.getElementById('featureSelect');
+            const runButton = document.querySelector('.btn-ai');
+            
+            if (toggle) {
+                toggle.checked = aiEnabled;
+            }
+            
+            if (statusText) {
+                statusText.textContent = aiEnabled ? 'ON' : 'OFF';
+                statusText.style.color = aiEnabled ? '#4caf50' : '#f44336';
+            }
+            
+            // Disable/enable AI features (except summary)
+            if (featureSelect) {
+                const options = featureSelect.querySelectorAll('option');
+                options.forEach(option => {
+                    if (option.value !== 'none' && option.value !== 'summary') {
+                        option.disabled = !aiEnabled;
+                    }
+                });
+                
+                // If current selection is disabled, reset to none
+                if (!aiEnabled && featureSelect.value !== 'none' && featureSelect.value !== 'summary') {
+                    featureSelect.value = 'none';
+                }
+            }
+            
+            // Update run button
+            if (runButton) {
+                if (!aiEnabled && featureSelect && featureSelect.value !== 'none' && featureSelect.value !== 'summary') {
+                    runButton.disabled = true;
+                    runButton.style.opacity = '0.5';
+                    runButton.style.cursor = 'not-allowed';
+                } else {
+                    runButton.disabled = false;
+                    runButton.style.opacity = '1';
+                    runButton.style.cursor = 'pointer';
+                }
+            }
+        }
+        
+        // Toggle AI state
+        async function toggleAI() {
+            const toggle = document.getElementById('aiToggle');
+            const newState = toggle.checked;
+            
+            try {
+                const response = await fetch('/api/features/ai-toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: newState })
+                });
+                
+                const data = await response.json();
+                aiEnabled = data.ai_enabled;
+                updateAIToggleUI();
+                
+                // Show notification
+                const statusEl = document.getElementById('aiStatus');
+                if (statusEl) {
+                    statusEl.textContent = data.message;
+                    statusEl.style.color = aiEnabled ? '#4caf50' : '#f44336';
+                    setTimeout(() => {
+                        statusEl.textContent = 'Ready';
+                        statusEl.style.color = 'gray';
+                    }, 3000);
+                }
+            } catch (error) {
+                console.error('Error toggling AI:', error);
+                toggle.checked = !newState; // Revert toggle
+                alert('Failed to toggle AI state. Please try again.');
+            }
         }
 
         function connect() {
@@ -621,11 +810,13 @@
             container.scrollTop = container.scrollHeight;
 
             // Keep track for AI analysis
+            // Note: ai_enabled is tracked on backend, but we'll filter on frontend too
             chatMessages.push({
                 id: div.dataset.id,
                 sender: msgData.sender,
                 message: msgData.message,
-                element: div
+                element: div,
+                ai_enabled: msgData.ai_enabled !== undefined ? msgData.ai_enabled : aiEnabled
             });
         }
 
@@ -685,6 +876,12 @@
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
             const statusEl = document.getElementById('aiStatus');
+            
+            // Check AI state for non-summary features
+            if (feature !== 'none' && feature !== 'summary' && !aiEnabled) {
+                alert('AI features are currently disabled. Please enable AI to use this feature.');
+                return;
+            }
 
             if (feature === 'none') {
                 alert("Please select a feature.");
@@ -736,8 +933,14 @@
             statusEl.textContent = "Analyzing...";
 
             try {
+                // Filter messages to only include AI-enabled ones (except for summary)
+                let messagesToUse = chatMessages;
+                if (feature !== 'summary') {
+                    messagesToUse = chatMessages.filter(m => m.ai_enabled !== false);
+                }
+                
                 // Prepare payload: List of messages
-                const messagesPayload = chatMessages.map(m => ({
+                const messagesPayload = messagesToUse.map(m => ({
                     id: m.id,
                     sender: m.sender,
                     message: m.message
@@ -762,6 +965,17 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestBody)
                 });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    if (response.status === 403) {
+                        alert(errorData.detail || 'AI features are currently disabled. Please enable AI to use this feature.');
+                        statusEl.textContent = "AI features disabled";
+                        statusEl.style.color = '#f44336';
+                        return;
+                    }
+                    throw new Error(errorData.detail || 'Request failed');
+                }
 
                 const result = await response.json();
                 console.log("AI Result:", result); // Debug log
@@ -976,6 +1190,12 @@
                 alert("No messages to analyze for tasks.");
                 return;
             }
+            
+            // Check AI state
+            if (!aiEnabled) {
+                alert('AI features are currently disabled. Please enable AI to use task extraction.');
+                return;
+            }
 
             const modal = document.getElementById('tasksModal');
             const loading = document.getElementById('tasksLoading');
@@ -1062,6 +1282,12 @@
                 alert("No messages to translate.");
                 return;
             }
+            
+            // Check AI state
+            if (!aiEnabled) {
+                alert('AI features are currently disabled. Please enable AI to use translation.');
+                return;
+            }
 
             const statusEl = document.getElementById('aiStatus');
             const langSelect = document.getElementById('translationLanguage');
@@ -1073,7 +1299,9 @@
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
             try {
-                const payload = chatMessages.map(m => ({
+                // Filter to only AI-enabled messages
+                const aiEnabledMessages = chatMessages.filter(m => m.ai_enabled !== false);
+                const payload = aiEnabledMessages.map(m => ({
                     id: m.id,
                     text: m.message,
                     target_language: targetLang
@@ -1137,6 +1365,12 @@
         async function generateReminderSuggestions() {
             if (chatMessages.length === 0) {
                 alert("No messages to analyze for reminders.");
+                return;
+            }
+            
+            // Check AI state
+            if (!aiEnabled) {
+                alert('AI features are currently disabled. Please enable AI to use reminder suggestions.');
                 return;
             }
 
@@ -1469,8 +1703,12 @@
             if (event.target == transcriptionModal) transcriptionModal.style.display = 'none';
         }
 
-        // Initial Connect
+        // Initialize AI status and connect
+        initializeAIStatus();
         connect();
+        
+        // Add event listener for AI toggle
+        document.getElementById('aiToggle').addEventListener('change', toggleAI);
 
     </script>
 </body>

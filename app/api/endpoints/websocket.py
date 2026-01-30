@@ -65,7 +65,8 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous") 
             print(f"[{timestamp}] {username} ({user_id[:8]}...): {message_text}")
 
             # Add message to history and get the message object with message_id
-            chat_message = chat_history.add_message(username, message_text, timestamp)
+            # Pass current AI state when adding message
+            chat_message = chat_history.add_message(username, message_text, timestamp, ai_enabled=chat_history.get_ai_enabled())
 
             await manager.broadcast(
                 {
@@ -74,6 +75,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous") 
                     "message": message_text,
                     "timestamp": timestamp,
                     "message_id": chat_message.message_id,  # Include message_id for frontend
+                    "ai_enabled": chat_message.ai_enabled,  # Include AI state for frontend
                 },
                 exclude_user_id=user_id,
             )

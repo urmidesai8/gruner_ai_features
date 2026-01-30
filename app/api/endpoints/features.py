@@ -24,15 +24,55 @@ from ...services.translation_service import translate_messages_batch
 class TextSummaryRequest(BaseModel):
     text: str
 
+class AIToggleRequest(BaseModel):
+    enabled: bool
+
 router = APIRouter()
+
+@router.get("/ai-status")
+async def get_ai_status() -> JSONResponse:
+    """Get the current AI enabled status."""
+    return JSONResponse(content={"ai_enabled": chat_history.get_ai_enabled()})
+
+@router.post("/ai-toggle")
+async def toggle_ai(request: AIToggleRequest) -> JSONResponse:
+    """Toggle AI features on/off globally.
+    
+    When AI is OFF:
+    - All AI features become unavailable
+    - Messages sent during this time are not considered for AI analysis
+    - Only messages sent when AI is ON will be used for AI features
+    
+    Exception: Chat Summary always uses all messages regardless of AI state.
+    """
+    chat_history.set_ai_enabled(request.enabled)
+    return JSONResponse(content={
+        "ai_enabled": chat_history.get_ai_enabled(),
+        "message": f"AI features {'enabled' if request.enabled else 'disabled'}"
+    })
 
 @router.post("/prioritize")
 async def prioritize_messages(messages: List[FeatureRequest]):
-    """Classify priority for a list of messages"""
+    """Classify priority for a list of messages.
+    
+    Note: Only processes messages that were created when AI was enabled.
+    """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     if not messages:
         return {}
     
-    prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in messages]
+    # Filter to only include messages created when AI was enabled
+    ai_enabled_messages = chat_history.get_ai_enabled_messages()
+    ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
+    filtered_messages = [m for m in messages if m.id in ai_enabled_ids]
+    
+    if not filtered_messages:
+        return {}
+    
+    prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     
     prompt = f"""
@@ -51,17 +91,32 @@ async def prioritize_messages(messages: List[FeatureRequest]):
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
     except Exception:
-        results = {m.id: "Normal" for m in messages}
+        results = {m.id: "Normal" for m in filtered_messages}
         
     return JSONResponse(content=results)
 
 @router.post("/moderate")
 async def moderate_messages(messages: List[FeatureRequest]):
-    """Check moderation status"""
+    """Check moderation status.
+    
+    Note: Only processes messages that were created when AI was enabled.
+    """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     if not messages:
         return {}
     
-    prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in messages]
+    # Filter to only include messages created when AI was enabled
+    ai_enabled_messages = chat_history.get_ai_enabled_messages()
+    ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
+    filtered_messages = [m for m in messages if m.id in ai_enabled_ids]
+    
+    if not filtered_messages:
+        return {}
+    
+    prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     
     prompt = f"""
@@ -80,7 +135,7 @@ async def moderate_messages(messages: List[FeatureRequest]):
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
     except Exception:
-        results = {m.id: {"safe": True} for m in messages}
+        results = {m.id: {"safe": True} for m in filtered_messages}
 
     return JSONResponse(content=results)
 
@@ -91,11 +146,25 @@ async def smart_replies(request: SmartRepliesRequest):
     Request body:
     - messages: List of messages to generate replies for
     - tone: Tone of the reply (auto, professional, casual, friendly, formal) - default: auto
+    
+    Note: Only processes messages that were created when AI was enabled.
     """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     if not request.messages:
         return JSONResponse(content={"suggestions": []})
     
-    last_msg = request.messages[-1]
+    # Filter to only include messages created when AI was enabled
+    ai_enabled_messages = chat_history.get_ai_enabled_messages()
+    ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
+    filtered_messages = [m for m in request.messages if m.id in ai_enabled_ids]
+    
+    if not filtered_messages:
+        return JSONResponse(content={"suggestions": []})
+    
+    last_msg = filtered_messages[-1]
     tone = request.tone.lower()
     
     # Define tone instructions
@@ -145,14 +214,18 @@ async def summarize_chat(request: SummarizeRequest) -> JSONResponse:
     Request body:
     - username: Optional username to get personalized "What did I miss?" summary.
     - total_messages: Optional number of recent messages to consider (default: 100)
+    
+    Note: Chat Summary ALWAYS uses ALL messages regardless of AI toggle state.
+    This is an exception to the AI filtering rule.
     """
     try:
+        # Chat summary always uses all messages (exception to AI filtering)
         if request.username:
             messages = chat_history.get_unread_messages(request.username)
             if not messages:
-                messages = chat_history.get_all_messages()
+                messages = chat_history.get_all_messages_for_summary()
         else:
-            messages = chat_history.get_all_messages()
+            messages = chat_history.get_all_messages_for_summary()
 
         summary = generate_chat_summary(
             messages, 
@@ -194,14 +267,23 @@ async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
 
     - If `username` is provided, prefer that user's unread messages; if none, use all.
     - Otherwise, run on the entire chat history.
+    
+    Note: Only processes messages that were created when AI was enabled.
     """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     try:
+        # Get AI-enabled messages only
         if username:
-            messages = chat_history.get_unread_messages(username)
-            if not messages:
-                messages = chat_history.get_all_messages()
+            all_messages = chat_history.get_unread_messages(username)
+            if not all_messages:
+                all_messages = chat_history.get_ai_enabled_messages()
         else:
-            messages = chat_history.get_all_messages()
+            all_messages = chat_history.get_ai_enabled_messages()
+        
+        messages = all_messages
 
         result = extract_tasks_from_messages(messages)
         return JSONResponse(content=result)
@@ -220,6 +302,8 @@ async def get_reminder_suggestions(
     Request body:
     - username: Optional username to get personalized suggestions
     - context_window: Optional number of recent messages to consider (default: all)
+    
+    Note: Only processes messages that were created when AI was enabled.
 
     Returns:
     {
@@ -237,6 +321,10 @@ async def get_reminder_suggestions(
         ]
     }
     """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     try:
         result = generate_context_based_suggestions(
             username=request.username, context_window=request.context_window
@@ -297,6 +385,8 @@ async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse
     """Translate chat messages into a target language.
 
     Request body: List of objects
+    
+    Note: Only processes messages that were created when AI was enabled.
     [
       {
         "id": "message-id",
@@ -317,11 +407,23 @@ async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse
       }
     }
     """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+    
     if not requests:
+        return JSONResponse(content={"translations": {}})
+    
+    # Filter to only include messages created when AI was enabled
+    ai_enabled_messages = chat_history.get_ai_enabled_messages()
+    ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
+    filtered_requests = [r for r in requests if r.id in ai_enabled_ids]
+    
+    if not filtered_requests:
         return JSONResponse(content={"translations": {}})
 
     try:
-        payload = [r.dict() for r in requests]
+        payload = [r.dict() for r in filtered_requests]
         result = translate_messages_batch(payload)
         return JSONResponse(content=result)
     except Exception as e:  # pragma: no cover - defensive

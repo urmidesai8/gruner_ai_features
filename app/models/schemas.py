@@ -9,6 +9,7 @@ class ChatMessage(BaseModel):
     message: str
     timestamp: str
     message_id: str
+    ai_enabled: bool = True  # Whether AI was enabled when this message was created
 
 class FeatureRequest(BaseModel):
     """Model for AI feature requests"""
@@ -66,26 +67,61 @@ class Reminder(BaseModel):
 
 
 class ChatHistory:
-    """Stores chat message history with unread tracking."""
+    """Stores chat message history with unread tracking and AI state management."""
 
     def __init__(self) -> None:
         self.messages: List[ChatMessage] = []
         # username -> last message index read
         self.user_last_read: Dict[str, int] = {}
+        # AI state tracking
+        self.ai_enabled: bool = True  # Default: AI is enabled
+        self.ai_toggle_history: List[Dict] = []  # Track when AI was toggled
 
-    def add_message(self, sender: str, message: str, timestamp: str) -> ChatMessage:
-        """Add a new message to the history."""
+    def add_message(self, sender: str, message: str, timestamp: str, ai_enabled: Optional[bool] = None) -> ChatMessage:
+        """Add a new message to the history.
+        
+        Args:
+            sender: Message sender
+            message: Message text
+            timestamp: Message timestamp
+            ai_enabled: Whether AI was enabled (defaults to current AI state)
+        """
+        if ai_enabled is None:
+            ai_enabled = self.ai_enabled
+        
         msg = ChatMessage(
             sender=sender,
             message=message,
             timestamp=timestamp,
             message_id=str(uuid.uuid4()),
+            ai_enabled=ai_enabled,
         )
         self.messages.append(msg)
         return msg
+    
+    def set_ai_enabled(self, enabled: bool) -> None:
+        """Set the AI enabled state."""
+        from datetime import datetime
+        self.ai_enabled = enabled
+        self.ai_toggle_history.append({
+            "enabled": enabled,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        })
+    
+    def get_ai_enabled(self) -> bool:
+        """Get the current AI enabled state."""
+        return self.ai_enabled
+    
+    def get_ai_enabled_messages(self) -> List[dict]:
+        """Get only messages that were created when AI was enabled."""
+        return [msg.dict() for msg in self.messages if msg.ai_enabled]
+    
+    def get_all_messages_for_summary(self) -> List[dict]:
+        """Get all messages (for chat summary feature which always uses all messages)."""
+        return [msg.dict() for msg in self.messages]
 
     def get_all_messages(self) -> List[dict]:
-        """Get all messages as dictionaries."""
+        """Get all messages as dictionaries (for display purposes)."""
         return [msg.dict() for msg in self.messages]
 
     def get_messages_since(self, since_index: int = 0) -> List[dict]:

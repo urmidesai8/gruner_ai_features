@@ -34,13 +34,15 @@ def generate_context_based_suggestions(
         }
     """
     try:
-        # Get relevant messages
+        # Get relevant messages (only AI-enabled messages)
         if username:
-            messages = chat_history.get_unread_messages(username)
-            if not messages:
-                messages = chat_history.get_all_messages()
+            all_messages = chat_history.get_unread_messages(username)
+            if not all_messages:
+                all_messages = chat_history.get_ai_enabled_messages()
         else:
-            messages = chat_history.get_all_messages()
+            all_messages = chat_history.get_ai_enabled_messages()
+        
+        messages = all_messages
         
         # Apply context window if specified
         if context_window and context_window > 0:
