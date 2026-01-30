@@ -2,6 +2,10 @@ from fastapi import APIRouter, HTTPException, File, UploadFile
 from typing import List, Optional, Dict
 from fastapi.responses import JSONResponse
 import json
+import shutil
+import os
+from pathlib import Path
+import uuid
 from pydantic import BaseModel
 from ...models.schemas import (
     FeatureRequest,
@@ -25,6 +29,9 @@ from ...services.translation_service import translate_messages_batch
 
 class TextSummaryRequest(BaseModel):
     text: str
+
+class AudioFileRequest(BaseModel):
+    filename: str
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -455,6 +462,47 @@ async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse
         raise HTTPException(
             status_code=500, detail=f"Error translating messages: {str(e)}"
         ) from e
+
+UPLOAD_DIR = Path("static/uploads")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+@router.post("/upload-audio")
+async def upload_audio_file(file: UploadFile = File(...)) -> JSONResponse:
+    try:
+        # Generate unique filename to avoid collisions
+        file_ext = os.path.splitext(file.filename)[1]
+        if not file_ext:
+            file_ext = ".webm" # Default for browser recording
+            
+        unique_filename = f"{uuid.uuid4()}{file_ext}"
+        file_path = UPLOAD_DIR / unique_filename
+        
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return JSONResponse(content={
+            "url": f"/static/uploads/{unique_filename}",
+            "filename": unique_filename
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}") from e
+
+@router.post("/transcribe-file")
+async def transcribe_saved_file(request: AudioFileRequest) -> JSONResponse:
+    try:
+        file_path = UPLOAD_DIR / request.filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        # Transcribe
+        with open(file_path, "rb") as audio_file:
+            # Pass tuple (filename, file_object)
+            transcription_text = transcribe_audio((request.filename, audio_file))
+            
+        return JSONResponse(content={"transcription": transcription_text})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}") from e
+
 
 @router.post("/transcribe")
 async def transcribe_voice_note(file: UploadFile = File(...)) -> JSONResponse:
