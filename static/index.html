@@ -1159,7 +1159,7 @@
         async function summarizeAudioMsg(filename, elementId) {
             const container = document.getElementById(elementId);
             container.innerHTML = 'Summarizing...';
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             try {
                 // First Transcribe
@@ -1198,7 +1198,7 @@
         async function translateAudioMsg(filename, elementId) {
             const container = document.getElementById(elementId);
             container.innerHTML = 'Translating...';
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             // Determine receiving user language
             // Since we don't know who is viewing (simulated one-screen), 
@@ -1302,7 +1302,7 @@
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
             const statusEl = document.getElementById('aiStatus');
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             // Check AI state for non-summary features
             if (feature !== 'none' && feature !== 'summary' && !aiEnabled) {
@@ -1523,7 +1523,7 @@
             const modal = document.getElementById('summaryModal');
             const loading = document.getElementById('summaryLoading');
             const results = document.getElementById('summaryResults');
-            let model = document.getElementById('aiModelSelector').value;
+            let model = getSelectedModel();
             let totalMessages = 100;
 
             if (!aiEnabled) {
@@ -1637,7 +1637,7 @@
             const modal = document.getElementById('tasksModal');
             const loading = document.getElementById('tasksLoading');
             const results = document.getElementById('tasksResults');
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -1733,7 +1733,7 @@
             const targetLangLabel = langSelect
                 ? langSelect.options[langSelect.selectedIndex].text
                 : targetLang.toUpperCase();
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
@@ -1818,7 +1818,7 @@
             const loading = document.getElementById('remindersLoading');
             const results = document.getElementById('remindersResults');
             const contextWindowInput = document.getElementById('reminderContextWindow');
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -2081,7 +2081,7 @@
             if (!transcriptText) return;
 
             const results = document.getElementById('transcriptionSummaryResult');
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             // Show loading state directly in the result div
             results.innerHTML = '<div style="text-align:center; padding:10px;">Generating summary...</div>';
@@ -2137,7 +2137,7 @@
             const targetLang = langSelect.value;
             const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
             const results = document.getElementById('transcriptionTranslationResult');
-            const model = document.getElementById('aiModelSelector').value;
+            const model = getSelectedModel();
 
             // Show loading state
             results.innerHTML = `<div style="text-align:center; padding:10px;">Translating to ${targetLangLabel}...</div>`;
@@ -2210,7 +2210,7 @@
             }
 
             try {
-                const model = document.getElementById('aiModelSelector').value;
+                const model = getSelectedModel();
                 const payload = [{
                     id: messageObj.id,
                     text: messageObj.message,
@@ -2298,6 +2298,17 @@
 
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
+
+        // Helper to get selected model (enforcing one model as requested)
+        function getSelectedModel() {
+            // User requested to force this model for all services, 
+            // while keeping the UI list visible.
+            return "openai/gpt-oss-120b";
+        }
+
+
+
+
 
         // Add event listeners for language selection changes
         document.getElementById('user1Language').addEventListener('change', function () {
