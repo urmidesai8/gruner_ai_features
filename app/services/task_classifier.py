@@ -81,7 +81,7 @@ Return the JSON now.
         )
 
     api_params = {
-        "model": "llama-3.1-8b-instant",
+        "model": model or "llama-3.1-8b-instant",
         "messages": [
             {
                 "role": "system",

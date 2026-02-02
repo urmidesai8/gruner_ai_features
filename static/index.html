@@ -23,6 +23,8 @@
             text-align: center;
             color: #333;
             margin-bottom: 20px;
+            margin-top: 60px;
+            /* Prevent overlap with fixed AI toggle */
         }
 
         .main-container {
@@ -548,8 +550,17 @@
 
 <body>
 
-    <!-- AI Toggle in Top Right Corner -->
+    <!-- AI Toggle and Model Selector in Top Right Corner -->
     <div class="ai-toggle-container">
+        <select id="aiModelSelector"
+            style="margin-right: 10px; padding: 5px; border-radius: 5px; border: 1px solid #ccc; font-size: 0.9em;">
+            <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+            <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+            <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
+            <option value="gemma2-9b-it">Gemma 2 9B</option>
+            <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 Distill 70B</option>
+            <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+        </select>
         <label for="aiToggle">
             <span id="aiStatusLabel">AI Features: </span>
         </label>
@@ -926,10 +937,7 @@
             // Dual connection means we might receive duplicates if we aren't careful, 
             // but the backend `exclude_user_id` logic usually handles "echo".
             // However, since we have ONE UI showing ALL messages, we need to be careful.
-            // Simplified: The backend broadcasts to everyone except sender.
-            // BUT, our UI needs to show the sender's own message too immediately?
-            // Actually, best pattern: Sender adds locally, others receive via WS.
-            // OR: Backend broadcasts to EVERYONE including sender (simpler for state sync).
+            // Simplified: The backend broadcasts to everyone including sender (simpler for state sync).
 
             // In the provided `main.py`, it uses `exclude_user_id`.
             // So User 1 sends -> Backend -> User 2 receives.
@@ -960,6 +968,7 @@
                     <div style="margin-top: 5px;">
                         <button class="suggestion-btn" onclick="transcribeAudioMsg('${filename}', '${actionId}')">Transcribe</button>
                         <button class="suggestion-btn" onclick="summarizeAudioMsg('${filename}', '${actionId}')">Summary</button>
+                        <button class="suggestion-btn" onclick="translateAudioMsg('${filename}', '${actionId}')">Translate</button>
                     </div>
                     <div id="${actionId}"></div>
                 `;
@@ -1150,6 +1159,7 @@
         async function summarizeAudioMsg(filename, elementId) {
             const container = document.getElementById(elementId);
             container.innerHTML = 'Summarizing...';
+            const model = document.getElementById('aiModelSelector').value;
 
             try {
                 // First Transcribe
@@ -1167,7 +1177,7 @@
                 const sumResponse = await fetch('/api/features/summarize-text', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: text })
+                    body: JSON.stringify({ text: text, model: model })
                 });
 
                 const sumData = await sumResponse.json();
@@ -1179,6 +1189,81 @@
                         <p>${escapeHtml(sumData.summary)}</p>
                     </div>
                  `;
+
+            } catch (error) {
+                container.innerHTML = `<span style="color:red">Error: ${error.message}</span>`;
+            }
+        }
+
+        async function translateAudioMsg(filename, elementId) {
+            const container = document.getElementById(elementId);
+            container.innerHTML = 'Translating...';
+            const model = document.getElementById('aiModelSelector').value;
+
+            // Determine receiving user language
+            // Since we don't know who is viewing (simulated one-screen), 
+            // we'll try to guess based on who SENT it. 
+            // If User 1 sent it, translate to User 2's language, and vice-versa.
+
+            // However, we don't have the message element here easily to check sender.
+            // But we can check `currentRecordingUser` if it was just recorded? No.
+            // Let's pass the message ID or something? 
+            // `filename` has `user1_` or `user2_` prefix usually? No, uuid.
+
+            // Simpler: Just try to find which user sent it by checking the message div? 
+            // The `elementId` is `audio-actions-[msgId]`.
+            const msgId = elementId.replace('audio-actions-', '');
+            // We need to look up the message in `chatMessages` array
+            const msgObj = chatMessages.find(m => m.id === msgId || m.id == msgId);
+
+            if (!msgObj) {
+                container.innerHTML = 'Error: Message not found.';
+                return;
+            }
+
+            const sender = msgObj.sender === user1Name ? 'user1' : 'user2';
+            const receiver = sender === 'user1' ? 'user2' : 'user1';
+            const langSelect = document.getElementById(`${receiver}Language`);
+
+            if (!langSelect || !langSelect.value) {
+                container.innerHTML = `<span style="color:orange">Please select a language for ${receiver === 'user1' ? user1Name : user2Name}.</span>`;
+                return;
+            }
+
+            const targetLang = langSelect.value;
+
+            try {
+                // 1. Transcribe
+                const transResponse = await fetch('/api/features/transcribe-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: filename })
+                });
+                const transData = await transResponse.json();
+                if (!transResponse.ok) throw new Error(transData.detail || 'Transcription failed');
+                const text = transData.transcription;
+
+                // 2. Translate
+                // Use generic translate-text endpoint
+                const transTextResponse = await fetch('/api/features/translate-text', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        target_language: targetLang,
+                        model: model
+                    })
+                });
+
+                const transTextData = await transTextResponse.json();
+                if (!transTextResponse.ok) throw new Error(transTextData.detail || 'Translation failed');
+
+                container.innerHTML = `
+                    <div style="margin-top:5px; padding:5px; background:#e8f5e9; border-radius:4px;">
+                        <strong>Translated (${targetLang}):</strong>
+                        <p>${escapeHtml(transTextData.translated_text)}</p>
+                    </div>
+                `;
 
             } catch (error) {
                 container.innerHTML = `<span style="color:red">Error: ${error.message}</span>`;
@@ -1217,6 +1302,7 @@
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
             const statusEl = document.getElementById('aiStatus');
+            const model = document.getElementById('aiModelSelector').value;
 
             // Check AI state for non-summary features
             if (feature !== 'none' && feature !== 'summary' && !aiEnabled) {
@@ -1226,16 +1312,6 @@
 
             if (feature === 'none') {
                 alert("Please select a feature.");
-                return;
-            }
-
-            if (feature === 'transcribe') {
-                document.getElementById('transcriptionModal').style.display = 'block';
-                return;
-            }
-
-            if (feature === 'transcribe') {
-                document.getElementById('transcriptionModal').style.display = 'block';
                 return;
             }
 
@@ -1288,16 +1364,24 @@
                 }));
 
                 let url = `/api/features/${feature}`;
-                let requestBody;
+                let requestBody = {};
 
                 if (feature === 'smart_replies') {
                     url = '/api/features/smart-replies';
                     const tone = document.getElementById('replyTone').value || 'auto';
                     requestBody = {
                         messages: messagesPayload,
-                        tone: tone
+                        tone: tone,
+                        model: model
+                    };
+                } else if (feature === 'prioritize' || feature === 'moderate') {
+                    // Wrap in AIAnalysisRequest structure
+                    requestBody = {
+                        messages: messagesPayload,
+                        model: model
                     };
                 } else {
+                    // Fallback (shouldn't happen with current features)
                     requestBody = messagesPayload;
                 }
 
@@ -1439,6 +1523,7 @@
             const modal = document.getElementById('summaryModal');
             const loading = document.getElementById('summaryLoading');
             const results = document.getElementById('summaryResults');
+            const model = document.getElementById('aiModelSelector').value;
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -1452,7 +1537,8 @@
 
                 const requestBody = {
                     username: username,
-                    total_messages: totalMessages
+                    total_messages: totalMessages,
+                    model: model
                 };
 
                 const response = await fetch('/api/features/chat-summarize', {
@@ -1541,6 +1627,7 @@
             const modal = document.getElementById('tasksModal');
             const loading = document.getElementById('tasksLoading');
             const results = document.getElementById('tasksResults');
+            const model = document.getElementById('aiModelSelector').value;
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -1549,7 +1636,7 @@
             try {
                 // Use User 1 as the username for tasks (or could be configurable)
                 const username = user1Name;
-                const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}`, {
+                const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}&model=${encodeURIComponent(model)}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1636,6 +1723,7 @@
             const targetLangLabel = langSelect
                 ? langSelect.options[langSelect.selectedIndex].text
                 : targetLang.toUpperCase();
+            const model = document.getElementById('aiModelSelector').value;
 
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
@@ -1645,7 +1733,8 @@
                 const payload = aiEnabledMessages.map(m => ({
                     id: m.id,
                     text: m.message,
-                    target_language: targetLang
+                    target_language: targetLang,
+                    model: model
                 }));
 
                 const response = await fetch('/api/features/translate', {
@@ -1719,6 +1808,7 @@
             const loading = document.getElementById('remindersLoading');
             const results = document.getElementById('remindersResults');
             const contextWindowInput = document.getElementById('reminderContextWindow');
+            const model = document.getElementById('aiModelSelector').value;
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -1730,7 +1820,8 @@
 
                 const requestBody = {
                     username: username,
-                    context_window: contextWindow
+                    context_window: contextWindow,
+                    model: model
                 };
 
                 const response = await fetch('/api/features/smart-reminders/suggestions', {
@@ -1980,6 +2071,7 @@
             if (!transcriptText) return;
 
             const results = document.getElementById('transcriptionSummaryResult');
+            const model = document.getElementById('aiModelSelector').value;
 
             // Show loading state directly in the result div
             results.innerHTML = '<div style="text-align:center; padding:10px;">Generating summary...</div>';
@@ -1988,7 +2080,7 @@
                 const response = await fetch('/api/features/summarize-text', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: transcriptText })
+                    body: JSON.stringify({ text: transcriptText, model: model })
                 });
 
                 const data = await response.json();
@@ -2034,8 +2126,8 @@
             const langSelect = document.getElementById('transcriptLangSelect');
             const targetLang = langSelect.value;
             const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
-
             const results = document.getElementById('transcriptionTranslationResult');
+            const model = document.getElementById('aiModelSelector').value;
 
             // Show loading state
             results.innerHTML = `<div style="text-align:center; padding:10px;">Translating to ${targetLangLabel}...</div>`;
@@ -2046,7 +2138,8 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         text: transcriptText,
-                        target_language: targetLang
+                        target_language: targetLang,
+                        model: model
                     })
                 });
 
@@ -2107,10 +2200,12 @@
             }
 
             try {
+                const model = document.getElementById('aiModelSelector').value;
                 const payload = [{
                     id: messageObj.id,
                     text: messageObj.message,
-                    target_language: targetLang
+                    target_language: targetLang,
+                    model: model
                 }];
 
                 const response = await fetch('/api/features/translate', {

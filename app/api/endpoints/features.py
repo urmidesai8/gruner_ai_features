@@ -9,6 +9,7 @@ import uuid
 from pydantic import BaseModel
 from ...models.schemas import (
     FeatureRequest,
+    AIAnalysisRequest,
     chat_history,
     SummarizeRequest,
     SmartRepliesRequest,
@@ -29,6 +30,7 @@ from ...services.translation_service import translate_messages_batch
 
 class TextSummaryRequest(BaseModel):
     text: str
+    model: Optional[str] = None
 
 class AudioFileRequest(BaseModel):
     filename: str
@@ -61,7 +63,7 @@ async def toggle_ai(request: AIToggleRequest) -> JSONResponse:
     })
 
 @router.post("/prioritize")
-async def prioritize_messages(messages: List[FeatureRequest]):
+async def prioritize_messages(request: AIAnalysisRequest):
     """Classify priority for a list of messages.
     
     Note: Only processes messages that were created when AI was enabled.
@@ -76,7 +78,7 @@ async def prioritize_messages(messages: List[FeatureRequest]):
     # Filter to only include messages created when AI was enabled
     ai_enabled_messages = chat_history.get_ai_enabled_messages()
     ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
-    filtered_messages = [m for m in messages if m.id in ai_enabled_ids]
+    filtered_messages = [m for m in request.messages if m.id in ai_enabled_ids]
     
     if not filtered_messages:
         return {}
@@ -95,7 +97,7 @@ async def prioritize_messages(messages: List[FeatureRequest]):
     """
     
     try:
-        response_text = call_groq_ai(prompt)
+        response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
@@ -105,7 +107,7 @@ async def prioritize_messages(messages: List[FeatureRequest]):
     return JSONResponse(content=results)
 
 @router.post("/moderate")
-async def moderate_messages(messages: List[FeatureRequest]):
+async def moderate_messages(request: AIAnalysisRequest):
     """Check moderation status.
     
     Note: Only processes messages that were created when AI was enabled.
@@ -120,7 +122,7 @@ async def moderate_messages(messages: List[FeatureRequest]):
     # Filter to only include messages created when AI was enabled
     ai_enabled_messages = chat_history.get_ai_enabled_messages()
     ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
-    filtered_messages = [m for m in messages if m.id in ai_enabled_ids]
+    filtered_messages = [m for m in request.messages if m.id in ai_enabled_ids]
     
     if not filtered_messages:
         return {}
@@ -139,7 +141,7 @@ async def moderate_messages(messages: List[FeatureRequest]):
     """
     
     try:
-        response_text = call_groq_ai(prompt)
+        response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
@@ -204,7 +206,7 @@ async def smart_replies(request: SmartRepliesRequest):
     """
     
     try:
-        response_text = call_groq_ai(prompt)
+        response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         result = json.loads(response_text)
@@ -239,7 +241,8 @@ async def summarize_chat(request: SummarizeRequest) -> JSONResponse:
         summary = generate_chat_summary(
             messages, 
             username=request.username, 
-            total_messages=request.total_messages
+            total_messages=request.total_messages,
+            model=request.model
         )
 
         if request.username:
@@ -271,7 +274,7 @@ async def get_messages(username: Optional[str] = None) -> JSONResponse:
 
 
 @router.post("/tasks-classifier")
-async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
+async def classify_tasks(username: Optional[str] = None, model: Optional[str] = None) -> JSONResponse:
     """Identify tasks/todos in chat messages and return them in a structured format.
 
     - If `username` is provided, prefer that user's unread messages; if none, use all.
@@ -294,7 +297,7 @@ async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
         
         messages = all_messages
 
-        result = extract_tasks_from_messages(messages)
+        result = extract_tasks_from_messages(messages, model=model)
         return JSONResponse(content=result)
     except Exception as e:  # pragma: no cover - defensive
         raise HTTPException(
@@ -303,9 +306,11 @@ async def classify_tasks(username: Optional[str] = None) -> JSONResponse:
 
 
 @router.post("/translate")
-async def translate_chat_messages(request: List[Dict]) -> JSONResponse:
+async def translate_chat_messages(requests: List[TranslationRequest]) -> JSONResponse:
     try:
-        result = translate_messages_batch(request)
+        model = requests[0].model if requests else None
+        payload = [r.dict() for r in requests]
+        result = translate_messages_batch(payload, model=model)
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(
@@ -317,7 +322,7 @@ async def translate_chat_messages(request: List[Dict]) -> JSONResponse:
 async def translate_text_endpoint(request: TextTranslationRequest) -> JSONResponse:
     """Translate raw text into a target language."""
     try:
-        result = translate_text(request.text, request.target_language)
+        result = translate_text(request.text, request.target_language, model=request.model)
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(
@@ -359,7 +364,7 @@ async def get_reminder_suggestions(
     
     try:
         result = generate_context_based_suggestions(
-            username=request.username, context_window=request.context_window
+            username=request.username, context_window=request.context_window, model=request.model
         )
         return JSONResponse(content=result)
     except Exception as e:  # pragma: no cover - defensive
@@ -529,7 +534,7 @@ async def summarize_text(request: TextSummaryRequest) -> JSONResponse:
     Summarize raw text (e.g. from transcription).
     """
     try:
-        result = generate_text_summary(request.text)
+        result = generate_text_summary(request.text, model=request.model)
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Summary failed: {str(e)}") from e

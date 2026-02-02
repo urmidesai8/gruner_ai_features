@@ -108,7 +108,7 @@ Return the JSON response now:"""
             )
 
         api_params = {
-            "model": "llama-3.1-8b-instant",
+            "model": model or "llama-3.1-8b-instant",
             "messages": [
                 {
                     "role": "system",
@@ -212,7 +212,7 @@ Return the JSON response now:"""
             "participants": list(participants),
         }
 
-def generate_text_summary(text: str) -> dict:
+def generate_text_summary(text: str, model: str = None) -> dict:
     """
     Generate a formatted summary structure from raw text (e.g. transcription).
     Reuses the structure of chat summary.
