@@ -1,10 +1,10 @@
 import json
-from typing import List
+from typing import List, Optional
 
 from app.services.summarizer import groq_client  # reuse same LLM client
 
 
-def extract_tasks_from_messages(messages: List[dict]) -> dict:
+def extract_tasks_from_messages(messages: List[dict], model: Optional[str] = None) -> dict:
     """Extract structured tasks (todos) from chat messages using the LLM.
 
     Returns a dict of the form:

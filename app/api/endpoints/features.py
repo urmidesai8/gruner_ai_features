@@ -72,7 +72,7 @@ async def prioritize_messages(request: AIAnalysisRequest):
     if not chat_history.get_ai_enabled():
         raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
     
-    if not messages:
+    if not request.messages:
         return {}
     
     # Filter to only include messages created when AI was enabled
@@ -116,7 +116,7 @@ async def moderate_messages(request: AIAnalysisRequest):
     if not chat_history.get_ai_enabled():
         raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
     
-    if not messages:
+    if not request.messages:
         return {}
     
     # Filter to only include messages created when AI was enabled
@@ -307,15 +307,37 @@ async def classify_tasks(username: Optional[str] = None, model: Optional[str] = 
 
 @router.post("/translate")
 async def translate_chat_messages(requests: List[TranslationRequest]) -> JSONResponse:
+    """Translate chat messages into a target language.
+
+    Request body: list of objects (each may include optional `model`).
+    Note: Only processes messages that were created when AI was enabled.
+    """
+    # Check if AI is enabled
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="AI features are currently disabled. Please enable AI to use this feature.",
+        )
+
+    if not requests:
+        return JSONResponse(content={"translations": {}})
+
+    # Filter to only include messages created when AI was enabled
+    ai_enabled_messages = chat_history.get_ai_enabled_messages()
+    ai_enabled_ids = {msg["message_id"] for msg in ai_enabled_messages}
+    filtered_requests = [r for r in requests if r.id in ai_enabled_ids]
+
+    if not filtered_requests:
+        return JSONResponse(content={"translations": {}})
+
     try:
-        model = requests[0].model if requests else None
-        payload = [r.dict() for r in requests]
+        # Prefer per-item model if set; otherwise defaulting is handled in the service
+        model = filtered_requests[0].model if filtered_requests else None
+        payload = [r.dict() for r in filtered_requests]
         result = translate_messages_batch(payload, model=model)
         return JSONResponse(content=result)
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Translation failed: {str(e)}"
-        ) from e
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail=f"Translation failed: {str(e)}") from e
 
 
 @router.post("/translate-text")
@@ -416,57 +438,6 @@ async def create_reminder(request: ReminderCreateRequest) -> JSONResponse:
             status_code=500, detail=f"Error creating reminder: {str(e)}"
         ) from e
 
-
-@router.post("/translate")
-async def translate_messages(requests: List[TranslationRequest]) -> JSONResponse:
-    """Translate chat messages into a target language.
-
-    Request body: List of objects
-    
-    Note: Only processes messages that were created when AI was enabled.
-    [
-      {
-        "id": "message-id",
-        "text": "Hello, world!",
-        "target_language": "es"
-      },
-      ...
-    ]
-
-    Returns:
-    {
-      "translations": {
-        "message-id": {
-          "translated_text": "Hola, mundo!",
-          "detected_language": "en"
-        },
-        ...
-      }
-    }
-    """
-    # Check if AI is enabled
-    if not chat_history.get_ai_enabled():
-        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
-    
-    if not requests:
-        return JSONResponse(content={"translations": {}})
-    
-    # Filter to only include messages created when AI was enabled
-    ai_enabled_messages = chat_history.get_ai_enabled_messages()
-    ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
-    filtered_requests = [r for r in requests if r.id in ai_enabled_ids]
-    
-    if not filtered_requests:
-        return JSONResponse(content={"translations": {}})
-
-    try:
-        payload = [r.dict() for r in filtered_requests]
-        result = translate_messages_batch(payload)
-        return JSONResponse(content=result)
-    except Exception as e:  # pragma: no cover - defensive
-        raise HTTPException(
-            status_code=500, detail=f"Error translating messages: {str(e)}"
-        ) from e
 
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

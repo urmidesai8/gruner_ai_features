@@ -1,9 +1,14 @@
-from groq import Groq
+try:
+    from groq import Groq  # type: ignore
+except Exception:  # pragma: no cover - environment dependent
+    Groq = None  # type: ignore[assignment]
 from ..core.config import settings
 
-groq_client = Groq(api_key=settings.GROQ_API_KEY)
+groq_client = Groq(api_key=settings.GROQ_API_KEY) if Groq else None
 
 def call_groq_ai(prompt: str, model_name: str = None) -> str:
+    if not groq_client:
+        return "Error: missing dependency 'groq'. Please install it."
     if not groq_client.api_key:
         return "Error: GROQ_API_KEY not set."
     
@@ -21,6 +26,8 @@ def transcribe_audio(file_buffer) -> str:
     Transcribe audio file using Groq Whisper.
     file_buffer: file-like object with .name attribute (needed by Groq client)
     """
+    if not groq_client:
+        return "Error: missing dependency 'groq'. Please install it."
     if not groq_client.api_key:
         return "Error: GROQ_API_KEY not set."
 
