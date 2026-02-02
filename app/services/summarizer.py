@@ -14,7 +14,7 @@ load_dotenv()
 groq_client = Groq(api_key=settings.GROQ_API_KEY)
 
 
-def generate_chat_summary(messages: List[dict], username: Optional[str] = None, total_messages: int = 100) -> dict:
+def generate_chat_summary(messages: List[dict], username: Optional[str] = None, total_messages: int = 100, model: str = None) -> dict:
     """
     Generate a comprehensive chat summary using Groq Llama 3.1 8B instant model.
 
@@ -251,7 +251,7 @@ Guidelines:
              return {"summary": "Error: GROQ_API_KEY not set."}
 
         api_params = {
-            "model": "llama-3.1-8b-instant",
+            "model": model or "llama-3.1-8b-instant",
             "messages": [
                 {"role": "system", "content": "You are a helpful assistant that analyzes text and provides structured JSON summaries."},
                 {"role": "user", "content": prompt},

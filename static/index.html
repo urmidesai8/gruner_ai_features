@@ -1523,7 +1523,19 @@
             const modal = document.getElementById('summaryModal');
             const loading = document.getElementById('summaryLoading');
             const results = document.getElementById('summaryResults');
-            const model = document.getElementById('aiModelSelector').value;
+            let model = document.getElementById('aiModelSelector').value;
+            let totalMessages = 100;
+
+            if (!aiEnabled) {
+                // If AI is disabled, force specific model and message count
+                model = 'openai/gpt-oss-120b';
+                totalMessages = 10;
+                // Optional: Notify user
+                // alert("AI is disabled. Generating summary using backup model (GPT OSS 120B) for last 10 messages.");
+            } else {
+                const totalMessagesInput = document.getElementById('summaryTotalMessages');
+                totalMessages = totalMessagesInput && totalMessagesInput.value ? parseInt(totalMessagesInput.value) : 100;
+            }
 
             modal.style.display = 'block';
             loading.style.display = 'block';
@@ -1532,8 +1544,6 @@
             try {
                 // Use User 1 as the username for summary (or could be configurable)
                 const username = user1Name;
-                const totalMessagesInput = document.getElementById('summaryTotalMessages');
-                const totalMessages = totalMessagesInput && totalMessagesInput.value ? parseInt(totalMessagesInput.value) : 100;
 
                 const requestBody = {
                     username: username,
