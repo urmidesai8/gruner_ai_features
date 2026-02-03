@@ -281,3 +281,93 @@ Guidelines:
 
     except Exception as e:
         return {"summary": f"Error generating summary: {str(e)}"}
+
+
+def generate_memory_extraction(messages: List[dict], chat_type: str, model: str = None) -> dict:
+    """
+    Extract structured memory data based on chat type.
+
+    Individual: Key Decisions, Tasks & Deadlines, Important Facts.
+    Group: Searchable Decisions, Auto-generated FAQs.
+    """
+    if not messages:
+        return {}
+
+    # Format messages for the prompt
+    chat_text = "\n".join(
+        f"[{msg['timestamp']}] {msg['sender']}: {msg['message']}"
+        for msg in messages
+        if msg.get("sender") != "System"
+    )
+
+    if chat_type == "individual":
+        system_prompt = "You are an AI assistant helping to memorize key details from a 1:1 conversation."
+        user_prompt = f"""
+Analyze this chat history and extract specific structured data for long-term memory.
+
+Chat History:
+{chat_text}
+
+Extract the following (be concise and mutually exclusive where possible):
+1. "decisions": Key decisions/agreements made. Do NOT include tasks here unless they are strategic decisions.
+2. "tasks": Specific tasks, todos, and ACTION ITEMS. *Crucial*: If a date/time/deadline is mentioned, include it.
+3. "facts": Important facts about the user or project (e.g. preferences, specs). Do NOT include trivial chat details.
+
+Guidelines:
+- If a message fits "tasks", put it there, do NOT repeat it in "decisions".
+- If no items exist for a category, return an empty list.
+- Be concise.
+
+Return a JSON object with keys: "decisions" (list of strings), "tasks" (list of strings), "facts" (list of strings).
+Return ONLY valid JSON.
+"""
+    elif chat_type == "group":
+        system_prompt = "You are an AI assistant managing a group chat knowledge base."
+        user_prompt = f"""
+Analyze this group chat history to create a "living document" state.
+
+Chat History:
+{chat_text}
+
+Extract the following:
+1. "decisions": Key decisions agreed upon (searchable). Be concise.
+2. "faqs": Auto-generated FAQs. Only generate an FAQ if a clear question was asked and answered.
+
+Guidelines:
+- Avoid redundancy. 
+- If no decisions or FAQs are found, return empty lists.
+
+Return a JSON object with keys: 
+- "decisions" (list of strings)
+- "faqs" (list of objects with "question" and "answer" fields)
+
+Return ONLY valid JSON.
+"""
+    else:
+        return {}  # specific types only
+
+    try:
+        api_params = {
+            "model": model or "llama-3.1-8b-instant",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0.5,
+            "max_tokens": 1500,
+            "response_format": {"type": "json_object"}
+        }
+
+        completion = groq_client.chat.completions.create(**api_params)
+        response_text = completion.choices[0].message.content.strip()
+        
+        # Cleanup JSON markdown if present
+        if response_text.startswith("```json"): response_text = response_text[7:]
+        if response_text.startswith("```"): response_text = response_text[3:]
+        if response_text.endswith("```"): response_text = response_text[:-3]
+
+        return json.loads(response_text.strip())
+
+    except Exception as e:
+        print(f"Error in generate_memory_extraction: {e}")
+        return {}

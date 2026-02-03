@@ -569,6 +569,7 @@
             <span class="toggle-slider"></span>
         </label>
         <span id="aiStatusText" style="color: #4caf50; font-weight: bold;">ON</span>
+        <button id="syncMemoriesBtn" class="btn-ai" style="padding: 5px 10px; margin-left: 10px; font-size: 0.85em; background-color: #009688;">Sync Memories</button>
     </div>
 
     <h1>Dual-User Simulation & AI Features</h1>
@@ -625,6 +626,7 @@
                     <option value="summary">Chat Summary</option>
                     <option value="tasks">Extract Tasks</option>
                     <option value="reminders">Smart Reminders</option>
+                    <option value="mem_search">Search Memories</option>
                     <option value="translate">Language Translation</option>
                     <option value="transcribe">Audio Transcription</option>
                 </select>
@@ -786,6 +788,19 @@
         const user1Name = "User 1";
         const user2Name = "User 2";
 
+        // Persistent User IDs
+        let user1Id = localStorage.getItem('user1_id');
+        if (!user1Id) {
+            user1Id = 'user1-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('user1_id', user1Id);
+        }
+
+        let user2Id = localStorage.getItem('user2_id');
+        if (!user2Id) {
+            user2Id = 'user2-' + Math.random().toString(36).substr(2, 9);
+            localStorage.setItem('user2_id', user2Id);
+        }
+
         // Global store for messages to easily update UI
         let chatMessages = [];
 
@@ -910,14 +925,16 @@
         }
 
         function connect() {
-            // Connect User 1
-            ws1 = new WebSocket(`${protocol}//${host}/ws?username=${encodeURIComponent(user1Name)}`);
+            // User 1 Connection
+            const ws1Url = `${protocol}//${host}/ws?username=${encodeURIComponent(user1Name)}&user_id=${user1Id}`;
+            ws1 = new WebSocket(ws1Url);
             ws1.onopen = () => updateStatus('status1', 'Connected (Online)', 'green');
             ws1.onclose = () => updateStatus('status1', 'Disconnected', 'red');
             ws1.onmessage = (e) => handleMessage(e);
 
-            // Connect User 2
-            ws2 = new WebSocket(`${protocol}//${host}/ws?username=${encodeURIComponent(user2Name)}`);
+            // User 2 Connection
+            const ws2Url = `${protocol}//${host}/ws?username=${encodeURIComponent(user2Name)}&user_id=${user2Id}`;
+            ws2 = new WebSocket(ws2Url);
             ws2.onopen = () => updateStatus('status2', 'Connected (Online)', 'green');
             ws2.onclose = () => updateStatus('status2', 'Disconnected', 'red');
             ws2.onmessage = (e) => handleMessage(e); // Both listen, but backend broadcasts to all
@@ -1343,6 +1360,11 @@
 
             if (feature === 'reminders') {
                 await generateReminderSuggestions();
+                return;
+            }
+
+            if (feature === 'mem_search') {
+                document.getElementById('memorySearchModal').style.display = 'block';
                 return;
             }
 
@@ -2306,6 +2328,51 @@
 
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
+        
+        // Sync Memories
+        const syncBtn = document.getElementById('syncMemoriesBtn');
+        if (syncBtn) {
+            syncBtn.addEventListener('click', syncMemories);
+        }
+
+        async function syncMemories() {
+            const btn = document.getElementById('syncMemoriesBtn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Syncing...';
+            btn.disabled = true;
+            btn.style.opacity = '0.7';
+            btn.style.cursor = 'wait';
+
+            try {
+                const response = await fetch('/api/features/ai-memory/refresh-individual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user1_id: user1Id,
+                        user1_name: user1Name,
+                        user2_id: user2Id,
+                        user2_name: user2Name,
+                        model: getSelectedModel()
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (response.ok) {
+                    alert(`Memories synced successfully! ${data.memories_upserted} items processed.`);
+                } else {
+                    throw new Error(data.detail || 'Sync failed');
+                }
+            } catch (error) {
+                console.error('Error syncing memories:', error);
+                alert('Failed to sync memories: ' + error.message);
+            } finally {
+                btn.textContent = originalText;
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        }
 
         // Helper to get selected model (enforcing one model as requested)
         function getSelectedModel() {
@@ -2338,8 +2405,8 @@
                 removeAutoTranslationsForUser('user2');
             }
         });
-
     </script>
+
 </body>
 
 </html>

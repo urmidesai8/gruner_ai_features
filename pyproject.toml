@@ -12,4 +12,5 @@ dependencies = [
     "python-multipart",
     "python-dotenv",
     "groq",
+    "qdrant-client>=1.8.0",
 ]
