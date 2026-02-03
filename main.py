@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -5,7 +7,21 @@ from fastapi.responses import FileResponse
 from app.api.endpoints import features, websocket
 
 
+def _connection_aware_exception_handler(loop, context):
+    """Suppress noisy connection errors when clients disconnect (e.g. tab close, refresh)."""
+    exc = context.get("exception")
+    if exc is not None and isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
+        return  # Client closed connection; no traceback
+    asyncio.default_exception_handler(loop, context)
+
+
 app = FastAPI()
+
+
+@app.on_event("startup")
+async def set_asyncio_exception_handler():
+    loop = asyncio.get_running_loop()
+    loop.set_exception_handler(_connection_aware_exception_handler)
 
 # Add CORS middleware
 app.add_middleware(

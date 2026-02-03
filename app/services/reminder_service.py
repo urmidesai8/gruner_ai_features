@@ -8,13 +8,14 @@ from app.models.schemas import chat_history
 
 
 def generate_context_based_suggestions(
-    username: Optional[str] = None, context_window: Optional[int] = None
+    username: Optional[str] = None, context_window: Optional[int] = None, model: str = None
 ) -> Dict:
     """Generate context-based reminder suggestions from chat history.
     
     Args:
         username: Optional username to filter messages for personalized suggestions
         context_window: Optional number of recent messages to consider (default: all)
+        model: Optional model name to use
     
     Returns:
         Dict with structure:
@@ -102,7 +103,7 @@ Return the JSON now.
             )
         
         api_params = {
-            "model": "llama-3.1-8b-instant",
+            "model": model or "llama-3.1-8b-instant",
             "messages": [
                 {
                     "role": "system",

@@ -17,36 +17,41 @@ class FeatureRequest(BaseModel):
     sender: str
     message: str
 
+class AIAnalysisRequest(BaseModel):
+    """Generic request model for AI analysis (prioritize, moderate, tasks)"""
+    messages: List[FeatureRequest]
+    model: Optional[str] = None
 
 class SmartRepliesRequest(BaseModel):
     """Request model for smart replies generation"""
     messages: List[FeatureRequest]
-    tone: str = "auto"  # auto, professional, casual, friendly, formal
-
+    tone: str = "auto"
+    model: Optional[str] = None
 
 class TranslationRequest(BaseModel):
     """Request model for language translation"""
     id: str
     text: str
-    target_language: str  # e.g. 'en', 'es', 'fr', 'de', 'hi', 'zh', 'ja'
-
+    target_language: str
+    model: Optional[str] = None
 
 class TextTranslationRequest(BaseModel):
     """Request model for generic text translation (e.g. transcripts)"""
     text: str
     target_language: str
-
+    model: Optional[str] = None
 
 class SummarizeRequest(BaseModel):
     """Request model for chat summarization"""
     username: Optional[str] = None
-    total_messages: Optional[int] = 100  # Number of recent messages to consider (default: 100)
-
+    total_messages: Optional[int] = 100
+    model: Optional[str] = None
 
 class ReminderSuggestionRequest(BaseModel):
     """Request model for context-based reminder suggestions"""
     username: Optional[str] = None
-    context_window: Optional[int] = None  # Number of recent messages to consider
+    context_window: Optional[int] = None
+    model: Optional[str] = None
 
 
 class ReminderCreateRequest(BaseModel):
@@ -175,7 +180,8 @@ class ConnectionManager:
     async def broadcast(self, message: dict, exclude_user_id: str | None = None) -> None:
         """Broadcast message to all connected users except the sender."""
         disconnected: List[str] = []
-        for user_id, connection in self.active_connections.items():
+        # Iterate over a copy to allow modification during iteration
+        for user_id, connection in list(self.active_connections.items()):
             if user_id != exclude_user_id:
                 try:
                     await connection.send_json(message)

@@ -5,7 +5,7 @@ from app.services.summarizer import groq_client  # reuse same LLM client
 
 
 
-def translate_text(text: str, target_language: str = "en") -> dict:
+def translate_text(text: str, target_language: str = "en", model: str = None) -> dict:
     """Translate a single block of text into a target language using the LLM.
 
     Returns:
@@ -46,7 +46,7 @@ Return the JSON now.
 """
 
     api_params = {
-        "model": "openai/gpt-oss-120b",
+        "model": model or "llama-3.3-70b-versatile",
         "messages": [
             {
                 "role": "system",
@@ -92,7 +92,7 @@ Return the JSON now.
         return {"translated_text": "Error during translation."}
 
 
-def translate_messages_batch(requests: List[Dict]) -> Dict:
+def translate_messages_batch(requests: List[Dict], model: str = None) -> Dict:
     """Translate a batch of messages into a target language using the LLM.
 
     Expects each request dict to have:
@@ -156,7 +156,7 @@ Return the JSON now.
 """
 
     api_params = {
-        "model": "llama-3.1-8b-instant",
+        "model": model or "llama-3.1-8b-instant",
         "messages": [
             {
                 "role": "system",
