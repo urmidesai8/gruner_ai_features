@@ -1738,8 +1738,11 @@
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
             try {
-                // Filter to only AI-enabled messages
-                const aiEnabledMessages = chatMessages.filter(m => m.ai_enabled !== false);
+                // Filter to only AI-enabled messages and skip audio marker messages
+                const aiEnabledMessages = chatMessages.filter(m =>
+                    m.ai_enabled !== false &&
+                    !(typeof m.message === 'string' && m.message.startsWith('[AUDIO]: '))
+                );
                 const payload = aiEnabledMessages.map(m => ({
                     id: m.id,
                     text: m.message,
@@ -2206,6 +2209,11 @@
 
             // Check if AI is still enabled
             if (!aiEnabled) {
+                return;
+            }
+
+            // Skip auto-translation for audio marker messages like "[AUDIO]: /static/uploads/..."
+            if (typeof messageObj.message === 'string' && messageObj.message.startsWith('[AUDIO]: ')) {
                 return;
             }
 

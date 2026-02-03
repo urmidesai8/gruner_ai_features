@@ -64,9 +64,21 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous") 
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             print(f"[{timestamp}] {username} ({user_id[:8]}...): {message_text}")
 
+            # For audio messages ([AUDIO]: URL), keep the full text for broadcasting
+            # so the frontend can render the audio player, but store a cleaned
+            # placeholder in history so users don't see internal URLs in summaries.
+            stored_message = message_text
+            if isinstance(message_text, str) and message_text.startswith("[AUDIO]: "):
+                stored_message = "[AUDIO]"
+
             # Add message to history and get the message object with message_id
             # Pass current AI state when adding message
-            chat_message = chat_history.add_message(username, message_text, timestamp, ai_enabled=chat_history.get_ai_enabled())
+            chat_message = chat_history.add_message(
+                username,
+                stored_message,
+                timestamp,
+                ai_enabled=chat_history.get_ai_enabled(),
+            )
 
             await manager.broadcast(
                 {
