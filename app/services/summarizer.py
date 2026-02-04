@@ -308,10 +308,10 @@ Analyze this chat history and extract specific structured data for long-term mem
 Chat History:
 {chat_text}
 
-Extract the following (be concise and mutually exclusive where possible):
-1. "decisions": Key decisions/agreements made. Do NOT include tasks here unless they are strategic decisions.
-2. "tasks": Specific tasks, todos, and ACTION ITEMS. *Crucial*: If a date/time/deadline is mentioned, include it.
-3. "facts": Important facts about the user or project (e.g. preferences, specs). Do NOT include trivial chat details.
+Extract the following (be concise and mutually exclusive where possible, ALWAYS attribute to specific users):
+1. "decisions": Key decisions/agreements made. Mention WHO agreed or decided. Do NOT include tasks.
+2. "tasks": Specific tasks, todos, and ACTION ITEMS. *Crucial*: Include WHO is responsible and any date/time/deadline.
+3. "facts": Important facts about the user or project. Mention WHO the fact applies to (e.g., "User 1 prefers Python").
 
 Guidelines:
 - If a message fits "tasks", put it there, do NOT repeat it in "decisions".
@@ -371,3 +371,80 @@ Return ONLY valid JSON.
     except Exception as e:
         print(f"Error in generate_memory_extraction: {e}")
         return {}
+
+
+def generate_rag_answer(query: str, context_memories: List[dict], model: str = None) -> dict:
+    """
+    Generate a natural language answer based on retrieved memories.
+    """
+    if not context_memories:
+        return {
+            "answer": "I couldn't find any relevant information in your memories to answer that question.",
+            "sources": []
+        }
+
+    # Prepare context
+    sources = []
+    context_text_parts = []
+    
+    for i, mem in enumerate(context_memories):
+        # Determine source label (e.g. "Chat with User 2 on 2026-02-03")
+        participants = mem.get("participants", [])
+        names = [p["name"] for p in participants if "name" in p]
+        time_range = mem.get("time_range", {}).get("from", "Unknown Date")
+        
+        source_label = f"Source {i+1} ({', '.join(names)} - {time_range})"
+        sources.append(source_label)
+        
+        context_text_parts.append(f"--- {source_label} ---\n{mem.get('summary_text', '')}")
+
+    context_text = "\n\n".join(context_text_parts)
+
+    prompt = f"""
+You are a helpful AI assistant answering a user's question based on their chat memories.
+
+Question: "{query}"
+
+Retrieved Memories (Context):
+{context_text}
+
+Instructions:
+1. Answer the question DIRECTLY and CONCISELY using *only* the provided context.
+2. If the answer is not in the context, say so.
+3. Cite the sources (e.g., "According to Source 1...") if relevant.
+
+Return a JSON object: {{ "answer": "Your answer here", "sources": ["Source 1", "Source 2"] }}
+Return ONLY valid JSON.
+"""
+
+    try:
+        api_params = {
+            "model": model or "llama-3.1-8b-instant",
+            "messages": [
+                {"role": "system", "content": "You are a helpful assistant for Question Answering over documents."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3, # Low temperature for factual accuracy
+            "max_tokens": 1000,
+            "response_format": {"type": "json_object"}
+        }
+
+        completion = groq_client.chat.completions.create(**api_params)
+        response_text = completion.choices[0].message.content.strip()
+
+        # Cleanup JSON markdown
+        if response_text.startswith("```json"): response_text = response_text[7:]
+        if response_text.startswith("```"): response_text = response_text[3:]
+        if response_text.endswith("```"): response_text = response_text[:-3]
+        
+        result = json.loads(response_text.strip())
+        
+        # Ensure fallback keys
+        if "answer" not in result: result["answer"] = "Error generating answer format."
+        if "sources" not in result: result["sources"] = sources
+        
+        return result
+
+    except Exception as e:
+        print(f"Error in generate_rag_answer: {e}")
+        return {"answer": "I encountered an error trying to generate an answer.", "sources": []}

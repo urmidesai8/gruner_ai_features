@@ -53,41 +53,48 @@ def ensure_collections_exist() -> None:
                 ),
             )
 
+        client.create_payload_index(
+            collection_name=name,
+            field_name="participant_ids",
+            field_schema=qmodels.PayloadSchemaType.KEYWORD,
+        )
+        client.create_payload_index(
+            collection_name=name,
+            field_name="chat_id",
+            field_schema=qmodels.PayloadSchemaType.KEYWORD,
+        )
+        if name == settings.QDRANT_GROUP_COLLECTION:
+            client.create_payload_index(
+                collection_name=name,
+                field_name="group_id",
+                field_schema=qmodels.PayloadSchemaType.KEYWORD,
+            )
 
-# ---- Simple embedding function (POC) ----
+
+# ---- Embedding function (FastEmbed) ----
+
+from fastembed import TextEmbedding
+
+_embedding_model = None
+
+def get_embedding_model() -> TextEmbedding:
+    global _embedding_model
+    if _embedding_model is None:
+        # Uses "BAAI/bge-small-en-v1.5" by default, which is efficient
+        _embedding_model = TextEmbedding()
+    return _embedding_model
 
 def embed_text(text: str) -> List[float]:
     """
-    Very simple deterministic embedding based on hashing.
-
-    This is a POC implementation so you can wire Qdrant end-to-end without
-    introducing a heavy embedding model dependency.
-
-    For production, replace this with a real embedding model, e.g.:
-    - OpenAI embeddings
-    - sentence-transformers
-    - HuggingFace embeddings
+    Generate semantic embeddings using FastEmbed.
     """
-    import hashlib
-    import math
-
     if not text:
         return [0.0] * VECTOR_SIZE
 
-    # Create a hash and spread it over VECTOR_SIZE positions
-    h = hashlib.sha256(text.encode("utf-8")).digest()
-    # Repeat hash bytes to fill VECTOR_SIZE
-    vals: List[float] = []
-    while len(vals) < VECTOR_SIZE:
-        for b in h:
-            vals.append(float(b))
-            if len(vals) >= VECTOR_SIZE:
-                break
-    # Normalize vector
-    norm = math.sqrt(sum(v * v for v in vals))
-    if norm == 0:
-        return [0.0] * VECTOR_SIZE
-    return [v / norm for v in vals]
+    model = get_embedding_model()
+    # model.embed returns a generator of numpy arrays, we take the first one and convert to list
+    embedding = list(model.embed([text]))[0]
+    return embedding.tolist()
 
 
 # ---- Memory extraction from chat messages ----
@@ -233,6 +240,7 @@ def upsert_individual_chat_memories(
             "sender_name": user1_name,
             "receiver_user_id": user2_id,
             "receiver_name": user2_name,
+            "participant_ids": [user1_id, user2_id],
             "participants": [
                 {"user_id": user1_id, "name": user1_name},
                 {"user_id": user2_id, "name": user2_name},
@@ -297,6 +305,7 @@ def upsert_group_chat_memories(
             "group_name": group_name,
             "chat_id": chat_id,
             "chat_type": "group",
+            "participant_ids": [p["user_id"] for p in participants],
             "participants": participants,
             "memory_type": mem["memory_type"],
             "summary_text": mem["summary_text"],
@@ -342,7 +351,7 @@ def search_individual_memories(
     filter_ = qmodels.Filter(
         must=[
             qmodels.FieldCondition(
-                key="participants.user_id",
+                key="participant_ids",
                 match=qmodels.MatchAny(any=[user_id]),
             )
         ]

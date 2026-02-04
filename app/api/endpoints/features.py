@@ -19,7 +19,7 @@ from ...models.schemas import (
     TextTranslationRequest,
 )
 from ...services.ai_service import call_groq_ai, transcribe_audio
-from ...services.summarizer import generate_chat_summary, generate_text_summary
+from ...services.summarizer import generate_chat_summary, generate_text_summary, generate_rag_answer
 from ...services.task_classifier import extract_tasks_from_messages
 from ...services.translation_service import translate_messages_batch, translate_text
 from ...services.memory_service import (
@@ -179,7 +179,15 @@ async def search_individual_memory(
         query=request.query,
         limit=request.limit,
     )
-    return JSONResponse(content={"results": results})
+    
+    # RAG Step: Generate natural language answer
+    rag_response = generate_rag_answer(request.query, results)
+    
+    return JSONResponse(content={
+        "results": results,
+        "answer": rag_response.get("answer"),
+        "sources": rag_response.get("sources")
+    })
 
 
 @router.post("/ai-memory/search-group")
@@ -194,7 +202,15 @@ async def search_group_memory(
         query=request.query,
         limit=request.limit,
     )
-    return JSONResponse(content={"results": results})
+
+    # RAG Step: Generate natural language answer
+    rag_response = generate_rag_answer(request.query, results)
+
+    return JSONResponse(content={
+        "results": results,
+        "answer": rag_response.get("answer"),
+        "sources": rag_response.get("sources")
+    })
 
 @router.post("/prioritize")
 async def prioritize_messages(request: AIAnalysisRequest):
