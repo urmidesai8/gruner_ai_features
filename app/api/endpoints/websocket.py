@@ -79,6 +79,7 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous", 
                 username,
                 stored_message,
                 timestamp,
+                user_id=user_id,
                 ai_enabled=chat_history.get_ai_enabled(),
             )
 

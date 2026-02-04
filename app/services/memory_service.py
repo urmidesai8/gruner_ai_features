@@ -226,7 +226,17 @@ def upsert_individual_chat_memories(
     sorted_ids = sorted([user1_id, user2_id])
     chat_id = f"individual:{sorted_ids[0]}:{sorted_ids[1]}"
 
-    memories = _build_memories_from_messages(messages, chat_type="individual", model=model)
+    # Map old names to current names in history using user_id
+    current_names = {user1_id: user1_name, user2_id: user2_name}
+    mapped_messages = []
+    for msg in messages:
+        m = msg.copy()
+        uid = m.get("user_id")
+        if uid in current_names:
+            m["sender"] = current_names[uid]
+        mapped_messages.append(m)
+
+    memories = _build_memories_from_messages(mapped_messages, chat_type="individual", model=model)
     if not memories:
         return 0
 
@@ -252,9 +262,10 @@ def upsert_individual_chat_memories(
             "confidence": mem.get("confidence", 0.0),
         }
 
-        # Deterministic ID based on chat_id to ensure 1-to-1 mapping (overwrite previous)
-        # We use UUID v5 with DNS namespace + chat_id string
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chat_id))
+        # Deterministic ID based on chat_id AND names to ensure new vectors for name changes
+        # We use UUID v5 with DNS namespace + unique string
+        id_seed = f"{chat_id}:{user1_name}:{user2_name}"
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, id_seed))
 
         points.append(
             qmodels.PointStruct(
@@ -292,7 +303,17 @@ def upsert_group_chat_memories(
 
     chat_id = f"group:{group_id}"
 
-    memories = _build_memories_from_messages(messages, chat_type="group", model=model)
+    # Map old names to current names using user_id
+    name_map = {p["user_id"]: p["name"] for p in participants}
+    mapped_messages = []
+    for msg in messages:
+        m = msg.copy()
+        uid = m.get("user_id")
+        if uid in name_map:
+            m["sender"] = name_map[uid]
+        mapped_messages.append(m)
+
+    memories = _build_memories_from_messages(mapped_messages, chat_type="group", model=model)
     if not memories:
         return 0
 
@@ -314,8 +335,9 @@ def upsert_group_chat_memories(
             "confidence": mem.get("confidence", 0.0),
         }
 
-        # Deterministic ID based on chat_id to ensure 1-to-1 mapping
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chat_id))
+        # Deterministic ID based on chat_id AND names
+        id_seed = f"{chat_id}:{group_name}"
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, id_seed))
 
         points.append(
             qmodels.PointStruct(

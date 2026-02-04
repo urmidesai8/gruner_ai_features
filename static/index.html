@@ -47,19 +47,27 @@
             gap: 10px;
         }
 
-        .user-panel h2 {
+        .user-panel h2, .user-name-input {
             border-bottom: 2px solid #ddd;
             padding-bottom: 10px;
-            margin-top: 0;
+            margin: 0 0 10px 0;
             text-align: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            width: 100%;
+            border-top: none;
+            border-left: none;
+            border-right: none;
+            background: transparent;
+            outline: none;
         }
 
-        .user-1-panel h2 {
+        .user-1-panel .user-name-input {
             border-color: #2196F3;
             color: #2196F3;
         }
 
-        .user-2-panel h2 {
+        .user-2-panel .user-name-input {
             border-color: #E91E63;
             color: #E91E63;
         }
@@ -577,7 +585,7 @@
     <div class="main-container">
         <!-- USER 1 PANEL -->
         <div class="user-panel user-1-panel">
-            <h2>User 1</h2>
+            <input type="text" id="user1NameInput" class="user-name-input" value="User 1" placeholder="Enter Name..." autocomplete="off">
             <div id="user1LanguageContainer" style="display: none; margin-bottom: 10px;">
                 <label for="user1Language"
                     style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate
@@ -656,7 +664,7 @@
 
         <!-- USER 2 PANEL -->
         <div class="user-panel user-2-panel">
-            <h2>User 2</h2>
+            <input type="text" id="user2NameInput" class="user-name-input" value="User 2" placeholder="Enter Name..." autocomplete="off">
             <div id="user2LanguageContainer" style="display: none; margin-bottom: 10px;">
                 <label for="user2Language"
                     style="font-size: 0.9em; font-weight: bold; display: block; margin-bottom: 5px;">Auto-translate
@@ -779,27 +787,73 @@
 
 
 
+    <!-- Memory Search Modal -->
+    <div id="memorySearchModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeMemorySearch()">&times;</span>
+            <h2>🔍 Search Memories</h2>
+            <div style="margin-bottom: 20px;">
+                <div style="margin-bottom: 10px;">
+                    <label for="searchUserSelect"><strong>Search as:</strong></label>
+                    <select id="searchUserSelect" style="padding: 5px; border-radius: 4px;">
+                        <option value="user1">User 1</option>
+                        <option value="user2">User 2</option>
+                    </select>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="memorySearchInput" placeholder="Ask a question (e.g. 'What was the deadline?')" 
+                           style="flex: 1; padding: 10px; border-radius: 5px; border: 1px solid #ccc;">
+                    <button class="btn-ai" onclick="performMemorySearch()">Search</button>
+                </div>
+            </div>
+            
+            <div id="memorySearchLoading" style="display: none; text-align: center; padding: 20px;">Searching memories...</div>
+            
+            <div id="memorySearchResults" style="margin-top: 20px;"></div>
+        </div>
+    </div>
+
     <script>
         // --- WebSocket Setup ---
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
 
         let ws1, ws2;
-        const user1Name = "User 1";
-        const user2Name = "User 2";
 
-        // Persistent User IDs
-        let user1Id = localStorage.getItem('user1_id');
-        if (!user1Id) {
-            user1Id = 'user1-' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('user1_id', user1Id);
+        function getUser1Name() {
+            return document.getElementById('user1NameInput').value.trim() || "User 1";
         }
 
-        let user2Id = localStorage.getItem('user2_id');
-        if (!user2Id) {
-            user2Id = 'user2-' + Math.random().toString(36).substr(2, 9);
-            localStorage.setItem('user2_id', user2Id);
+        function getUser2Name() {
+            return document.getElementById('user2NameInput').value.trim() || "User 2";
         }
+
+        // Reset names on load (avoid browser persistence)
+        document.getElementById('user1NameInput').value = "User 1";
+        document.getElementById('user2NameInput').value = "User 2";
+
+        // Handle name changes with reconnection
+        document.getElementById('user1NameInput').addEventListener('change', () => {
+            if (ws1) ws1.close();
+            reconnectUser1();
+        });
+
+        document.getElementById('user2NameInput').addEventListener('change', () => {
+            if (ws2) ws2.close();
+            reconnectUser2();
+        });
+
+        // Generate random UUID v4
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Random non-persistent User IDs
+        let user1Id = generateUUID();
+        let user2Id = generateUUID();
 
         // Global store for messages to easily update UI
         let chatMessages = [];
@@ -925,19 +979,24 @@
         }
 
         function connect() {
-            // User 1 Connection
-            const ws1Url = `${protocol}//${host}/ws?username=${encodeURIComponent(user1Name)}&user_id=${user1Id}`;
+            reconnectUser1();
+            reconnectUser2();
+        }
+
+        function reconnectUser1() {
+            const ws1Url = `${protocol}//${host}/ws?username=${encodeURIComponent(getUser1Name())}&user_id=${user1Id}`;
             ws1 = new WebSocket(ws1Url);
             ws1.onopen = () => updateStatus('status1', 'Connected (Online)', 'green');
             ws1.onclose = () => updateStatus('status1', 'Disconnected', 'red');
             ws1.onmessage = (e) => handleMessage(e);
+        }
 
-            // User 2 Connection
-            const ws2Url = `${protocol}//${host}/ws?username=${encodeURIComponent(user2Name)}&user_id=${user2Id}`;
+        function reconnectUser2() {
+            const ws2Url = `${protocol}//${host}/ws?username=${encodeURIComponent(getUser2Name())}&user_id=${user2Id}`;
             ws2 = new WebSocket(ws2Url);
             ws2.onopen = () => updateStatus('status2', 'Connected (Online)', 'green');
             ws2.onclose = () => updateStatus('status2', 'Disconnected', 'red');
-            ws2.onmessage = (e) => handleMessage(e); // Both listen, but backend broadcasts to all
+            ws2.onmessage = (e) => handleMessage(e);
         }
 
         function updateStatus(elemId, text, color) {
@@ -1000,12 +1059,12 @@
             const container = document.getElementById('messages');
             const div = document.createElement('div');
 
-            const isUser1 = msgData.sender === user1Name;
+            const isUser1 = msgData.sender === getUser1Name() || msgData.sender === "User 1";
             div.className = `message ${isUser1 ? 'left' : 'right'}`;
             div.dataset.id = msgData.message_id || Date.now(); // Ensure ID exists for AI features
 
             div.innerHTML = `
-                <div class="message-header">${msgData.sender}</div>
+                <div class="message-header">${escapeHtml(msgData.sender)}</div>
                 <div class="message-body">
                     ${renderMessageContent(msgData.message, div.dataset.id)}
                 </div>
@@ -1238,7 +1297,7 @@
                 return;
             }
 
-            const sender = msgObj.sender === user1Name ? 'user1' : 'user2';
+            const sender = msgObj.sender === getUser1Name() ? 'user1' : 'user2';
             const receiver = sender === 'user1' ? 'user2' : 'user1';
             const langSelect = document.getElementById(`${receiver}Language`);
 
@@ -1332,7 +1391,8 @@
                 return;
             }
 
-            if (chatMessages.length === 0) {
+            // Some features don't need existing messages
+            if (feature !== 'mem_search' && feature !== 'transcribe' && chatMessages.length === 0) {
                 alert("No messages to analyze.");
                 return;
             }
@@ -1564,8 +1624,8 @@
             results.innerHTML = '';
 
             try {
-                // Use User 1 as the username for summary (or could be configurable)
-                const username = user1Name;
+                // Use User 1's current name for summary request
+                const username = getUser1Name();
 
                 const requestBody = {
                     username: username,
@@ -1666,8 +1726,8 @@
             results.innerHTML = '';
 
             try {
-                // Use User 1 as the username for tasks (or could be configurable)
-                const username = user1Name;
+                // Use User 1's current name for tasks discovery
+                const username = getUser1Name();
                 const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}&model=${encodeURIComponent(model)}`, {
                     method: 'POST',
                     headers: {
@@ -1850,7 +1910,7 @@
             results.innerHTML = '';
 
             try {
-                const username = user1Name;
+                const username = getUser1Name();
                 const contextWindow = contextWindowInput.value ? parseInt(contextWindowInput.value) : null;
 
                 const requestBody = {
@@ -2202,24 +2262,108 @@
             document.getElementById('transcriptionModal').style.display = 'none';
         }
 
+        // Memory Search functionality
+        async function performMemorySearch() {
+            const queryInput = document.getElementById('memorySearchInput');
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            const userSelect = document.getElementById('searchUserSelect');
+            const selectedUser = userSelect.value;
+            const userId = selectedUser === 'user1' ? user1Id : user2Id;
+            
+            // Check AI state
+            if (!aiEnabled) {
+                alert('AI features are disabled.');
+                return;
+            }
+
+            const loading = document.getElementById('memorySearchLoading');
+            const results = document.getElementById('memorySearchResults');
+            
+            loading.style.display = 'block';
+            results.innerHTML = '';
+            
+            try {
+                 const response = await fetch('/api/features/ai-memory/search-individual', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_id: userId,
+                        query: query,
+                        limit: 5
+                    })
+                });
+                
+                const data = await response.json();
+                loading.style.display = 'none';
+                
+                if (!response.ok) throw new Error(data.detail || 'Search failed');
+                
+                // Display RAG Answer
+                let html = '';
+                
+                if (data.answer) {
+                    html += `
+                        <div class="summary-section" style="background: #e3f2fd; border-left: 4px solid #2196F3;">
+                            <h3 style="color: #0d47a1;">🤖 AI Answer</h3>
+                            <p style="font-size: 1.1em;">${escapeHtml(data.answer)}</p>
+                        </div>
+                    `;
+                }
+                
+                // Display Sources - HIDDEN as per request
+                /*
+                if (data.results && data.results.length > 0) {
+                     html += `<h3>📚 Sources</h3>`;
+                     data.results.forEach((res, index) => {
+                         const time = res.time_range ? new Date(res.time_range.from).toLocaleString() : 'Unknown time';
+                         html += `
+                            <div class="suggestion-box" style="margin-bottom: 10px; background: white; border: 1px solid #ddd; border-left: 3px solid #ccc;">
+                                <div style="font-size: 0.85em; color: #666; margin-bottom: 5px;">
+                                    <strong>Source ${index + 1}</strong> • ${time}
+                                </div>
+                                <div style="font-size: 0.9em;">${escapeHtml(res.summary_text)}</div>
+                            </div>
+                         `;
+                     });
+                } else {
+                    html += `<p>No relevant memory records found.</p>`;
+                }
+                */
+                
+                results.innerHTML = html;
+
+            } catch (error) {
+                loading.style.display = 'none';
+                results.innerHTML = `<p style="color: red;">Error: ${error.message}</p>`;
+            }
+        }
+
+        function closeMemorySearch() {
+            document.getElementById('memorySearchModal').style.display = 'none';
+        }
+
         // Close modal when clicking outside
         window.onclick = function (event) {
             const summaryModal = document.getElementById('summaryModal');
             const tasksModal = document.getElementById('tasksModal');
             const remindersModal = document.getElementById('remindersModal');
             const transcriptionModal = document.getElementById('transcriptionModal');
+            const memorySearchModal = document.getElementById('memorySearchModal');
 
             if (event.target == summaryModal) summaryModal.style.display = 'none';
             if (event.target == tasksModal) tasksModal.style.display = 'none';
             if (event.target == remindersModal) remindersModal.style.display = 'none';
             if (event.target == transcriptionModal) transcriptionModal.style.display = 'none';
+            if (event.target == memorySearchModal) memorySearchModal.style.display = 'none';
         }
 
         // Auto-translate message based on receiving user's language preference
         async function autoTranslateMessage(messageObj) {
-            const isUser1Sender = messageObj.sender === user1Name;
+            const isUser1Sender = messageObj.sender === getUser1Name();
             const receivingUser = isUser1Sender ? 'user2' : 'user1';
-            const receivingUserName = isUser1Sender ? user2Name : user1Name;
+            const receivingUserName = isUser1Sender ? getUser2Name() : getUser1Name();
             const langSelect = document.getElementById(`${receivingUser}Language`);
 
             if (!langSelect || !langSelect.value) {
@@ -2292,9 +2436,8 @@
                 return;
             }
 
-            // senderName is the user who sent the messages (user1 or user2)
-            // receivingUser is the user who wants to see translations (user1 or user2)
-            const sender = senderName === 'user1' ? user1Name : user2Name;
+            // senderName is 'user1' or 'user2'
+            const sender = senderName === 'user1' ? getUser1Name() : getUser2Name();
             const messagesToTranslate = chatMessages.filter(m =>
                 m.sender === sender &&
                 m.ai_enabled !== false
@@ -2311,7 +2454,7 @@
             // for messages that were translated TO this user's language preference
             // So if receivingUser is user1, we remove translations from messages sent by user2
             // If receivingUser is user2, we remove translations from messages sent by user1
-            const sender = receivingUser === 'user1' ? user2Name : user1Name;
+            const sender = receivingUser === 'user1' ? getUser2Name() : getUser1Name();
             const messagesFromSender = chatMessages.filter(m => m.sender === sender);
 
             messagesFromSender.forEach(msg => {
@@ -2349,9 +2492,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         user1_id: user1Id,
-                        user1_name: user1Name,
+                        user1_name: getUser1Name(),
                         user2_id: user2Id,
-                        user2_name: user2Name,
+                        user2_name: getUser2Name(),
                         model: getSelectedModel()
                     })
                 });

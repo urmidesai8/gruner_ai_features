@@ -6,6 +6,7 @@ import uuid
 class ChatMessage(BaseModel):
     """Model for chat message storage"""
     sender: str
+    user_id: str
     message: str
     timestamp: str
     message_id: str
@@ -88,7 +89,7 @@ class ChatHistory:
         self.ai_enabled: bool = True  # Default: AI is enabled
         self.ai_toggle_history: List[Dict] = []  # Track when AI was toggled
 
-    def add_message(self, sender: str, message: str, timestamp: str, ai_enabled: Optional[bool] = None) -> ChatMessage:
+    def add_message(self, sender: str, message: str, timestamp: str, user_id: str, ai_enabled: Optional[bool] = None) -> ChatMessage:
         """Add a new message to the history.
         
         Args:
@@ -102,6 +103,7 @@ class ChatHistory:
         
         msg = ChatMessage(
             sender=sender,
+            user_id=user_id,
             message=message,
             timestamp=timestamp,
             message_id=str(uuid.uuid4()),
