@@ -10,11 +10,9 @@ router = APIRouter()
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous", user_id: str = None) -> None:
+async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous") -> None:
     """WebSocket endpoint for multi-user chat."""
-    if not user_id:
-        user_id = str(uuid.uuid4())
-    
+    user_id = str(uuid.uuid4())
     client_address = websocket.client.host if websocket.client else "unknown"
 
     await manager.connect(websocket, user_id, username)
@@ -79,7 +77,6 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous", 
                 username,
                 stored_message,
                 timestamp,
-                user_id=user_id,
                 ai_enabled=chat_history.get_ai_enabled(),
             )
 

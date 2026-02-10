@@ -1,12 +1,11 @@
 import json
-import uuid
 from typing import List, Dict, Optional, Tuple
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 
 from app.core.config import settings
-from app.services.summarizer import generate_chat_summary, generate_text_summary, generate_memory_extraction, groq_client
+from app.services.summarizer import generate_chat_summary, groq_client
 
 
 # ---- Qdrant client & configuration ----
@@ -53,152 +52,97 @@ def ensure_collections_exist() -> None:
                 ),
             )
 
-        client.create_payload_index(
-            collection_name=name,
-            field_name="participant_ids",
-            field_schema=qmodels.PayloadSchemaType.KEYWORD,
-        )
-        client.create_payload_index(
-            collection_name=name,
-            field_name="chat_id",
-            field_schema=qmodels.PayloadSchemaType.KEYWORD,
-        )
-        if name == settings.QDRANT_GROUP_COLLECTION:
-            client.create_payload_index(
-                collection_name=name,
-                field_name="group_id",
-                field_schema=qmodels.PayloadSchemaType.KEYWORD,
-            )
 
-
-# ---- Embedding function (FastEmbed) ----
-
-from fastembed import TextEmbedding
-
-_embedding_model = None
-
-def get_embedding_model() -> TextEmbedding:
-    global _embedding_model
-    if _embedding_model is None:
-        # Uses "BAAI/bge-small-en-v1.5" by default, which is efficient
-        _embedding_model = TextEmbedding()
-    return _embedding_model
+# ---- Simple embedding function (POC) ----
 
 def embed_text(text: str) -> List[float]:
     """
-    Generate semantic embeddings using FastEmbed.
+    Very simple deterministic embedding based on hashing.
+
+    This is a POC implementation so you can wire Qdrant end-to-end without
+    introducing a heavy embedding model dependency.
+
+    For production, replace this with a real embedding model, e.g.:
+    - OpenAI embeddings
+    - sentence-transformers
+    - HuggingFace embeddings
     """
+    import hashlib
+    import math
+
     if not text:
         return [0.0] * VECTOR_SIZE
 
-    model = get_embedding_model()
-    # model.embed returns a generator of numpy arrays, we take the first one and convert to list
-    embedding = list(model.embed([text]))[0]
-    return embedding.tolist()
+    # Create a hash and spread it over VECTOR_SIZE positions
+    h = hashlib.sha256(text.encode("utf-8")).digest()
+    # Repeat hash bytes to fill VECTOR_SIZE
+    vals: List[float] = []
+    while len(vals) < VECTOR_SIZE:
+        for b in h:
+            vals.append(float(b))
+            if len(vals) >= VECTOR_SIZE:
+                break
+    # Normalize vector
+    norm = math.sqrt(sum(v * v for v in vals))
+    if norm == 0:
+        return [0.0] * VECTOR_SIZE
+    return [v / norm for v in vals]
 
 
 # ---- Memory extraction from chat messages ----
 
 def _build_memories_from_messages(
     messages: List[dict],
-    chat_type: str,
     model: Optional[str] = None,
 ) -> List[Dict]:
     """
     Use the existing chat summarizer to derive important memories from messages.
-    
-    Refactored to create a SINGLE comprehensive memory item for the entire conversation.
-    This ensures we only have one vector point per chat.
+
+    We treat:
+    - bullet_points -> type 'summary_point'
+    - key_decisions -> type 'decision'
+    - action_items  -> type 'action_item'
+
+    Each becomes a separate memory item with summary_text and metadata.
     """
     if not messages:
         return []
 
-    # Get generalized summary (still good for 'Overview' section)
-    summary_data = generate_chat_summary(
+    summary = generate_chat_summary(
         messages=messages,
         username=None,
-        total_messages=200, 
+        total_messages=200,  # limit for memory extraction
         model=model,
     )
-    
-    # Get specialized extraction
-    extraction_data = generate_memory_extraction(messages, chat_type, model=model)
 
-    # Basic time range approximation
+    memories: List[Dict] = []
+    # Basic time range approximation: from first to last message
     first_ts = messages[0].get("timestamp")
     last_ts = messages[-1].get("timestamp")
-    
-    lines = []
-    
-    # Only include Overview if we didn't get specialized data, OR if the client specifically wants it
-    # User requested: "The LLM should wisely classify... If any such categories not present that don't include it."
-    # We will prioritize the specific categories. Use summary ONLY if extraction failed or is empty.
-    
-    has_specialized_content = False
 
-    if chat_type == "individual":
-        # Individual: Decisions, Tasks, Facts
-        decisions = extraction_data.get("decisions", [])
-        if decisions:
-            lines.append("[Decisions]")
-            for d in decisions:
-                lines.append(f"- {d}")
-            has_specialized_content = True
-        
-        tasks = extraction_data.get("tasks", [])
-        if tasks:
-            lines.append("\n[Tasks & Deadlines]")
-            for t in tasks:
-                lines.append(f"- {t}")
-            has_specialized_content = True
+    def _add_memory(memory_type: str, text: str) -> None:
+        if not text:
+            return
+        memories.append(
+            {
+                "memory_type": memory_type,
+                "summary_text": text,
+                "time_range": {"from": first_ts, "to": last_ts},
+                "tags": [],  # can be enriched later
+                "confidence": 0.9,  # heuristic for now
+            }
+        )
 
-        facts = extraction_data.get("facts", [])
-        if facts:
-            lines.append("\n[Important Facts]")
-            for f in facts:
-                lines.append(f"- {f}")
-            has_specialized_content = True
+    for bp in summary.get("bullet_points", []):
+        _add_memory("summary_point", bp)
 
-    elif chat_type == "group":
-        # Group: Decisions, FAQs
-        decisions = extraction_data.get("decisions", [])
-        if decisions:
-            lines.append("[Decisions]")
-            for d in decisions:
-                lines.append(f"- {d}")
-            has_specialized_content = True
-        
-        faqs = extraction_data.get("faqs", [])
-        if faqs:
-            lines.append("\n[FAQs]")
-            for faq in faqs:
-                q = faq.get("question", "Q")
-                a = faq.get("answer", "A")
-                lines.append(f"Q: {q}")
-                lines.append(f"A: {a}")
-                lines.append("") # spacer
-            has_specialized_content = True
+    for dec in summary.get("key_decisions", []):
+        _add_memory("decision", dec)
 
-    if not has_specialized_content:
-        # Fallback to generic overview if nothing else was found
-        summary_text = summary_data.get("summary", "")
-        if summary_text:
-            lines.append(f"[Overview]\n{summary_text}")
-            
-    full_text = "\n".join(lines).strip()
-    
-    if not full_text:
-        return []
+    for ai in summary.get("action_items", []):
+        _add_memory("action_item", ai)
 
-    return [
-        {
-            "memory_type": "conversation_summary",
-            "summary_text": full_text,
-            "time_range": {"from": first_ts, "to": last_ts},
-            "tags": ["summary", "comprehensive", chat_type],
-            "confidence": 1.0,
-        }
-    ]
+    return memories
 
 
 # ---- Upsert helpers for individual & group chats ----
@@ -226,17 +170,7 @@ def upsert_individual_chat_memories(
     sorted_ids = sorted([user1_id, user2_id])
     chat_id = f"individual:{sorted_ids[0]}:{sorted_ids[1]}"
 
-    # Map old names to current names in history using user_id
-    current_names = {user1_id: user1_name, user2_id: user2_name}
-    mapped_messages = []
-    for msg in messages:
-        m = msg.copy()
-        uid = m.get("user_id")
-        if uid in current_names:
-            m["sender"] = current_names[uid]
-        mapped_messages.append(m)
-
-    memories = _build_memories_from_messages(mapped_messages, chat_type="individual", model=model)
+    memories = _build_memories_from_messages(messages, model=model)
     if not memories:
         return 0
 
@@ -250,7 +184,6 @@ def upsert_individual_chat_memories(
             "sender_name": user1_name,
             "receiver_user_id": user2_id,
             "receiver_name": user2_name,
-            "participant_ids": [user1_id, user2_id],
             "participants": [
                 {"user_id": user1_id, "name": user1_name},
                 {"user_id": user2_id, "name": user2_name},
@@ -262,14 +195,9 @@ def upsert_individual_chat_memories(
             "confidence": mem.get("confidence", 0.0),
         }
 
-        # Deterministic ID based on chat_id AND names to ensure new vectors for name changes
-        # We use UUID v5 with DNS namespace + unique string
-        id_seed = f"{chat_id}:{user1_name}:{user2_name}"
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, id_seed))
-
         points.append(
             qmodels.PointStruct(
-                id=point_id,
+                id=None,
                 vector=vector,
                 payload=payload,
             )
@@ -292,7 +220,7 @@ def upsert_group_chat_memories(
     """
     Build and upsert memory vectors for a group chat into the group_chats collection.
 
-    participants: list of dicts with keys {"user_id", "name"}
+    participants: list of dicts with keys {\"user_id\", \"name\"}
     Returns number of memories upserted.
     """
     ensure_collections_exist()
@@ -303,17 +231,7 @@ def upsert_group_chat_memories(
 
     chat_id = f"group:{group_id}"
 
-    # Map old names to current names using user_id
-    name_map = {p["user_id"]: p["name"] for p in participants}
-    mapped_messages = []
-    for msg in messages:
-        m = msg.copy()
-        uid = m.get("user_id")
-        if uid in name_map:
-            m["sender"] = name_map[uid]
-        mapped_messages.append(m)
-
-    memories = _build_memories_from_messages(mapped_messages, chat_type="group", model=model)
+    memories = _build_memories_from_messages(messages, model=model)
     if not memories:
         return 0
 
@@ -326,7 +244,6 @@ def upsert_group_chat_memories(
             "group_name": group_name,
             "chat_id": chat_id,
             "chat_type": "group",
-            "participant_ids": [p["user_id"] for p in participants],
             "participants": participants,
             "memory_type": mem["memory_type"],
             "summary_text": mem["summary_text"],
@@ -335,13 +252,9 @@ def upsert_group_chat_memories(
             "confidence": mem.get("confidence", 0.0),
         }
 
-        # Deterministic ID based on chat_id AND names
-        id_seed = f"{chat_id}:{group_name}"
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, id_seed))
-
         points.append(
             qmodels.PointStruct(
-                id=point_id,
+                id=None,
                 vector=vector,
                 payload=payload,
             )
@@ -373,7 +286,7 @@ def search_individual_memories(
     filter_ = qmodels.Filter(
         must=[
             qmodels.FieldCondition(
-                key="participant_ids",
+                key="participants.user_id",
                 match=qmodels.MatchAny(any=[user_id]),
             )
         ]
