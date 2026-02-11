@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Recording Transcription</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle at top left, #e3f2fd, #f5f5f5);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .page-container {
+            width: 100%;
+            max-width: 1100px;
+            padding: 24px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 18px;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16);
+            padding: 28px 32px 32px;
+            display: grid;
+            grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.3fr);
+            gap: 28px;
+        }
+
+        @media (max-width: 900px) {
+            .card {
+                grid-template-columns: minmax(0, 1fr);
+            }
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .title-group h1 {
+            font-size: 1.6rem;
+            margin: 0;
+            color: #111827;
+        }
+
+        .title-group p {
+            margin: 6px 0 0;
+            color: #6b7280;
+            font-size: 0.95rem;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4338ca;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+
+        .badge-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 999px;
+            background: #22c55e;
+            margin-right: 6px;
+        }
+
+        .upload-panel {
+            border-radius: 14px;
+            border: 1px dashed #cbd5f5;
+            padding: 20px 18px;
+            background: linear-gradient(135deg, #eff6ff 0%, #ffffff 55%, #f5f3ff 100%);
+        }
+
+        .upload-panel h2 {
+            margin: 0 0 4px;
+            font-size: 1.1rem;
+            color: #111827;
+        }
+
+        .upload-panel p {
+            margin: 0 0 14px;
+            font-size: 0.9rem;
+            color: #6b7280;
+        }
+
+        .upload-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-button {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 999px;
+            border: none;
+            background: linear-gradient(135deg, #2563eb, #4f46e5);
+            color: white;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            box-shadow: 0 10px 25px rgba(37, 99, 235, 0.35);
+            transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.1s ease;
+        }
+
+        .file-button:hover {
+            filter: brightness(1.05);
+            box-shadow: 0 14px 30px rgba(37, 99, 235, 0.45);
+        }
+
+        .file-button:active {
+            transform: translateY(1px);
+            box-shadow: 0 6px 18px rgba(37, 99, 235, 0.35);
+        }
+
+        .file-button span {
+            margin-left: 6px;
+        }
+
+        .hidden-input {
+            display: none;
+        }
+
+        .filename {
+            font-size: 0.85rem;
+            color: #374151;
+            max-width: 260px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .hint {
+            font-size: 0.78rem;
+            color: #9ca3af;
+            margin-top: 6px;
+        }
+
+        .primary-actions {
+            margin-top: 14px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .btn {
+            border-radius: 999px;
+            padding: 9px 16px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease, opacity 0.1s ease;
+        }
+
+        .btn-primary {
+            background: #111827;
+            color: white;
+            box-shadow: 0 8px 22px rgba(15, 23, 42, 0.45);
+        }
+
+        .btn-primary:hover {
+            background: #020617;
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.6);
+        }
+
+        .btn-secondary {
+            background: #eef2ff;
+            color: #4338ca;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e7ff;
+        }
+
+        .btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .status-row {
+            margin-top: 10px;
+            font-size: 0.8rem;
+            color: #6b7280;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            background: #9ca3af;
+        }
+
+        .status-dot.active {
+            background: #3b82f6;
+        }
+
+        .status-dot.done {
+            background: #22c55e;
+        }
+
+        .status-dot.error {
+            background: #ef4444;
+        }
+
+        .status-strong {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .right-column {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .section {
+            border-radius: 12px;
+            padding: 14px 14px 12px;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            min-height: 110px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .section-header h3 {
+            margin: 0;
+            font-size: 0.95rem;
+            color: #111827;
+        }
+
+        .pill {
+            font-size: 0.72rem;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
+        .section-body {
+            font-size: 0.86rem;
+            color: #374151;
+            max-height: 230px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .section-body.empty {
+            color: #9ca3af;
+            font-style: italic;
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 6px;
+            font-size: 0.74rem;
+            color: #6b7280;
+        }
+
+        .tag {
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: #eff6ff;
+            color: #1d4ed8;
+        }
+
+        .bullets ul {
+            margin: 0 0 0 16px;
+            padding: 0;
+        }
+
+        .bullets li {
+            margin-bottom: 4px;
+        }
+
+        .muted {
+            color: #9ca3af;
+        }
+
+        .error-text {
+            color: #b91c1c;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page-container">
+        <div class="card">
+            <div>
+                <div class="header">
+                    <div class="title-group">
+                        <h1>Meeting Recording Transcription</h1>
+                        <p>Upload a recording to generate a full transcript and AI meeting summary.</p>
+                    </div>
+                </div>
+
+                <div class="upload-panel">
+                    <h2>Upload meeting audio</h2>
+                    <p>Select a recorded meeting file (MP3, WAV, M4A, WebM, etc.).</p>
+
+                    <div style="margin-bottom: 12px;">
+                        <label for="asrModelSelect" style="font-size: 0.9rem; font-weight: 600; color: #374151;">Transcription model</label>
+                        <select id="asrModelSelect" style="width: 100%; max-width: 320px; margin-top: 6px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;">
+                            <option value="whisper-large-v3">whisper-large-v3</option>
+                            <option value="microsoft/VibeVoice-ASR">microsoft/VibeVoice-ASR</option>
+                            <option value="facebook/seamless-m4t-medium">facebook/seamless-m4t-medium</option>
+                            <option value="Qwen/Qwen3-ASR-1.7B">Qwen/Qwen3-ASR-1.7B</option>
+                        </select>
+                    </div>
+
+                    <div class="upload-row">
+                        <button class="file-button" id="pickFileButton">
+                            📁 <span>Choose audio file</span>
+                        </button>
+                        <input type="file" id="meetingFileInput" class="hidden-input" accept="audio/*">
+                        <span class="filename" id="selectedFilename">No file selected</span>
+                    </div>
+
+                    <div class="hint">
+                        Files are first stored on the server, then transcribed via <code>/transcribe-meeting-file</code>.
+                    </div>
+
+                    <div class="primary-actions">
+                        <button class="btn btn-primary" id="startTranscriptionBtn" disabled>
+                            ▶ Start transcription
+                        </button>
+                        <button class="btn btn-secondary" id="analyzeMeetingBtn" disabled>
+                            ✨ Analyze meeting
+                        </button>
+                    </div>
+
+                    <div class="status-row" id="statusRow">
+                        <span class="status-dot" id="statusDot"></span>
+                        <span class="status-strong" id="statusPrimary">Waiting for file</span>
+                        <span id="statusSecondary">Select a meeting recording to begin.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="right-column">
+                <div class="section">
+                    <div class="section-header">
+                        <h3>Transcript</h3>
+                        <span class="pill" id="transcriptLatencyPill">–</span>
+                    </div>
+                    <div class="section-body empty" id="transcriptBody">
+                        Transcript will appear here after transcription finishes.
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <h3>Meeting summary & action items</h3>
+                        <span class="pill" id="summaryLatencyPill">–</span>
+                    </div>
+                    <div class="section-body" id="summaryBody">
+                        <div class="muted">Run “Analyze meeting” after transcription to generate a structured summary,
+                            key points, and action items.</div>
+                    </div>
+                    <div class="tags">
+                        <span class="tag">Highlights</span>
+                        <span class="tag">Decisions</span>
+                        <span class="tag">Action items</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const meetingFileInput = document.getElementById('meetingFileInput');
+        const pickFileButton = document.getElementById('pickFileButton');
+        const selectedFilename = document.getElementById('selectedFilename');
+        const startTranscriptionBtn = document.getElementById('startTranscriptionBtn');
+        const analyzeMeetingBtn = document.getElementById('analyzeMeetingBtn');
+        const statusDot = document.getElementById('statusDot');
+        const statusPrimary = document.getElementById('statusPrimary');
+        const statusSecondary = document.getElementById('statusSecondary');
+        const transcriptBody = document.getElementById('transcriptBody');
+        const summaryBody = document.getElementById('summaryBody');
+        const transcriptLatencyPill = document.getElementById('transcriptLatencyPill');
+        const summaryLatencyPill = document.getElementById('summaryLatencyPill');
+
+        let uploadedFilename = null;
+        let transcriptText = '';
+
+        pickFileButton.addEventListener('click', () => {
+            meetingFileInput.click();
+        });
+
+        meetingFileInput.addEventListener('change', () => {
+            const file = meetingFileInput.files[0];
+            if (!file) {
+                selectedFilename.textContent = 'No file selected';
+                startTranscriptionBtn.disabled = true;
+                updateStatus('Waiting for file', 'Select a meeting recording to begin.', 'idle');
+                return;
+            }
+            selectedFilename.textContent = file.name;
+            uploadedFilename = null;
+            transcriptText = '';
+            transcriptBody.textContent = 'Transcript will appear here after transcription finishes.';
+            transcriptBody.classList.add('empty');
+            summaryBody.innerHTML = '<div class="muted">Run “Analyze meeting” after transcription to generate a structured summary, key points, and action items.</div>';
+            startTranscriptionBtn.disabled = false;
+            analyzeMeetingBtn.disabled = true;
+            updateStatus('Ready to upload', 'Click “Start transcription” to upload and transcribe.', 'active');
+        });
+
+        startTranscriptionBtn.addEventListener('click', async () => {
+            const file = meetingFileInput.files[0];
+            if (!file) {
+                alert('Please select a meeting recording first.');
+                return;
+            }
+
+            startTranscriptionBtn.disabled = true;
+            analyzeMeetingBtn.disabled = true;
+            updateStatus('Uploading file…', 'Sending audio to /upload-audio.', 'active');
+
+            try {
+                // 1) Upload audio file
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const uploadResp = await fetch('/api/features/upload-audio', {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                const uploadData = await uploadResp.json();
+                if (!uploadResp.ok) {
+                    throw new Error(uploadData.detail || 'Audio upload failed');
+                }
+
+                uploadedFilename = uploadData.filename;
+                updateStatus('Transcribing…', 'Processing file via /transcribe-meeting-file.', 'active');
+
+                // 2) Generate transcription with /transcribe-meeting-file
+                const asrModelSelect = document.getElementById('asrModelSelect');
+                const asrModel = asrModelSelect ? asrModelSelect.value : 'whisper-large-v3';
+                const t0 = performance.now();
+                const transcribeResp = await fetch('/api/features/transcribe-meeting-file', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filename: uploadedFilename, asr_model: asrModel }),
+                });
+
+                const transcribeData = await transcribeResp.json();
+                if (!transcribeResp.ok) {
+                    throw new Error(transcribeData.detail || 'Transcription failed');
+                }
+
+                const t1 = performance.now();
+                const seconds = ((t1 - t0) / 1000).toFixed(1);
+                if (transcriptLatencyPill) {
+                    transcriptLatencyPill.textContent = `${seconds}s`;
+                }
+
+                // Use raw transcription for downstream analysis, but display
+                // the speaker-formatted transcript when available.
+                transcriptText = transcribeData.transcription || '';
+                const displayText =
+                    transcribeData.formatted_transcription ||
+                    transcribeData.transcription ||
+                    'No text returned from transcription.';
+
+                transcriptBody.textContent = displayText;
+                transcriptBody.classList.remove('empty');
+
+                updateStatus('Transcription complete', 'You can now run meeting analysis.', 'done');
+                analyzeMeetingBtn.disabled = !transcriptText;
+            } catch (error) {
+                console.error(error);
+                updateStatus('Error', error.message || 'Something went wrong during transcription.', 'error');
+                startTranscriptionBtn.disabled = false;
+                analyzeMeetingBtn.disabled = true;
+            }
+        });
+
+        analyzeMeetingBtn.addEventListener('click', async () => {
+            if (!transcriptText) {
+                alert('No transcript available. Please transcribe the recording first.');
+                return;
+            }
+
+            analyzeMeetingBtn.disabled = true;
+            updateStatus('Analyzing meeting…', 'Calling /meeting-recording/summary with the transcript.', 'active');
+            summaryBody.innerHTML = '<div class="muted">Analyzing meeting…</div>';
+
+            try {
+                const t0 = performance.now();
+                const resp = await fetch('/api/features/meeting-recording/summary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transcription: transcriptText,
+                        model: null, // let backend default / choose model
+                    }),
+                });
+
+                const data = await resp.json();
+                if (!resp.ok) {
+                    throw new Error(data.detail || 'Meeting analysis failed');
+                }
+
+                const t1 = performance.now();
+                const seconds = ((t1 - t0) / 1000).toFixed(1);
+                if (summaryLatencyPill) {
+                    summaryLatencyPill.textContent = `${seconds}s`;
+                }
+
+                const summary = data.summary || 'No summary available.';
+                const bulletPoints = Array.isArray(data.bullet_points) ? data.bullet_points : [];
+                const keyDecisions = Array.isArray(data.key_decisions) ? data.key_decisions : [];
+                const actionItems = Array.isArray(data.action_items) ? data.action_items : [];
+
+                const html = `
+                    <div class="bullets">
+                        <p><strong>Overview</strong></p>
+                        <p>${summary}</p>
+                        ${bulletPoints.length ? `
+                            <p><strong>Key points</strong></p>
+                            <ul>${bulletPoints.map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>
+                        ` : ''}
+                        ${keyDecisions.length ? `
+                            <p><strong>Decisions</strong></p>
+                            <ul>${keyDecisions.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>
+                        ` : ''}
+                        ${actionItems.length ? `
+                            <p><strong>Action items</strong></p>
+                            <ul>${actionItems.map(a => `<li>${escapeHtml(a)}</li>`).join('')}</ul>
+                        ` : ''}
+                    </div>
+                `;
+
+                summaryBody.innerHTML = html;
+                updateStatus('Analysis complete', 'Meeting summary and action items generated.', 'done');
+            } catch (error) {
+                console.error(error);
+                summaryBody.innerHTML = `<div class="error-text">Error generating meeting summary: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+                updateStatus('Error', 'Meeting analysis failed. You can retry.', 'error');
+            } finally {
+                analyzeMeetingBtn.disabled = false;
+            }
+        });
+
+        function updateStatus(primary, secondary, state) {
+            statusPrimary.textContent = primary;
+            statusSecondary.textContent = secondary;
+            statusDot.classList.remove('active', 'done', 'error');
+            if (state === 'active') statusDot.classList.add('active');
+            if (state === 'done') statusDot.classList.add('done');
+            if (state === 'error') statusDot.classList.add('error');
+        }
+
+        function escapeHtml(text) {
+            if (typeof text !== 'string') return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+    </script>
+</body>
+
+</html>
+

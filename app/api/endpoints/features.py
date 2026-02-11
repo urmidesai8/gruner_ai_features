@@ -18,7 +18,14 @@ from ...models.schemas import (
     TranslationRequest,
     TextTranslationRequest,
 )
-from ...services.ai_service import call_groq_ai, transcribe_audio
+from ...services.ai_service import (
+    call_groq_ai,
+    transcribe_audio,
+    transcribe_audio_vibevoice,
+    transcribe_audio_seamless_m4t,
+    transcribe_audio_qwen3_asr,
+    format_meeting_transcription,
+)
 from ...services.summarizer import generate_chat_summary, generate_text_summary
 from ...services.task_classifier import extract_tasks_from_messages
 from ...services.translation_service import translate_messages_batch, translate_text
@@ -38,8 +45,34 @@ class TextSummaryRequest(BaseModel):
     text: str
     model: Optional[str] = None
 
+
 class AudioFileRequest(BaseModel):
     filename: str
+
+
+class MeetingRecordingSummaryRequest(BaseModel):
+    """
+    Request body for meeting recording post-processing.
+
+    This is triggered from the dedicated meeting transcription UI
+    *after* the raw transcription has been generated via /transcribe-file.
+    """
+
+    transcription: str
+    model: Optional[str] = None
+
+
+class MeetingAudioFileRequest(BaseModel):
+    """
+    Request body for meeting-specific transcription directly from an uploaded file.
+
+    This is similar to AudioFileRequest used by /transcribe-file but will
+    additionally format the transcript into a speaker-separated meeting view.
+    """
+
+    filename: str
+    model: Optional[str] = None  # LLM model for speaker formatting
+    asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium | Qwen/Qwen3-ASR-1.7B
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -614,6 +647,78 @@ async def transcribe_saved_file(request: AudioFileRequest) -> JSONResponse:
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}") from e
 
 
+@router.post("/transcribe-meeting-file")
+async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONResponse:
+    """
+    Transcribe an uploaded meeting recording and format it by speakers.
+
+    Flow:
+    - Accept filename of a previously uploaded audio file (same as /transcribe-file)
+    - Use Groq Whisper STT to generate the raw transcription text
+    - Post-process that text with an LLM to infer speaker turns and return
+      a clean, speaker-separated transcript.
+    """
+    try:
+        file_path = UPLOAD_DIR / request.filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+
+        # 1) Raw transcription: dispatch by selected ASR model
+        asr_model = (request.asr_model or "whisper-large-v3").strip()
+        if asr_model == "Qwen/Qwen3-ASR-1.7B":
+            raw_transcription = transcribe_audio_qwen3_asr(str(file_path))
+            if raw_transcription.startswith("Error"):
+                with open(file_path, "rb") as audio_file:
+                    raw_transcription = transcribe_audio((request.filename, audio_file))
+        elif asr_model in ("facebook/seamless-m4t-medium", "facebook/hf-seamless-m4t-medium"):
+            raw_transcription = transcribe_audio_seamless_m4t(str(file_path))
+            if raw_transcription.startswith("Error"):
+                with open(file_path, "rb") as audio_file:
+                    raw_transcription = transcribe_audio((request.filename, audio_file))
+        elif asr_model == "microsoft/VibeVoice-ASR":
+            raw_transcription = transcribe_audio_vibevoice(str(file_path))
+            if raw_transcription.startswith("Error"):
+                with open(file_path, "rb") as audio_file:
+                    raw_transcription = transcribe_audio((request.filename, audio_file))
+        else:
+            # default: whisper-large-v3 (Groq)
+            with open(file_path, "rb") as audio_file:
+                raw_transcription = transcribe_audio((request.filename, audio_file))
+
+        if isinstance(raw_transcription, str) and raw_transcription.startswith("Error"):
+            raise HTTPException(status_code=500, detail=raw_transcription)
+
+        # 2) Meeting-style formatted transcription (speaker separated)
+        formatted_transcription = format_meeting_transcription(
+            raw_transcription,
+            model_name=request.model,
+        )
+
+        if isinstance(formatted_transcription, str) and formatted_transcription.startswith("Error"):
+            # Fall back to raw transcription if formatting fails
+            return JSONResponse(
+                content={
+                    "transcription": raw_transcription,
+                    "formatted_transcription": None,
+                    "notice": "Meeting formatting failed; returning raw transcription only.",
+                }
+            )
+
+        return JSONResponse(
+            content={
+                "transcription": raw_transcription,
+                "formatted_transcription": formatted_transcription,
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting transcription failed: {str(e)}",
+        ) from e
+
+
 @router.post("/transcribe")
 async def transcribe_voice_note(file: UploadFile = File(...)) -> JSONResponse:
     """
@@ -643,3 +748,31 @@ async def summarize_text(request: TextSummaryRequest) -> JSONResponse:
         return JSONResponse(content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Summary failed: {str(e)}") from e
+
+
+@router.post("/meeting-recording/summary")
+async def meeting_recording_summary(
+    request: MeetingRecordingSummaryRequest,
+) -> JSONResponse:
+    """
+    Post-process a full meeting transcription into a structured summary.
+
+    This endpoint is designed to be called from the dedicated
+    meeting transcription page once `/transcribe-file` has returned
+    the raw transcript. It reuses the generic text summarization
+    pipeline but is scoped specifically for meeting recordings.
+    """
+    if not request.transcription.strip():
+        raise HTTPException(status_code=400, detail="Transcription text is required.")
+
+    try:
+        summary = generate_text_summary(
+            request.transcription,
+            model=request.model,
+        )
+        return JSONResponse(content=summary)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting recording summary failed: {str(e)}",
+        ) from e
