@@ -24,8 +24,8 @@ def _get_seamless_model_and_processor():
     from transformers import AutoProcessor, SeamlessM4TModel  # type: ignore
     import torch  # type: ignore
 
-    processor = AutoProcessor.from_pretrained(SEAMLESS_MODEL_ID)
-    model = SeamlessM4TModel.from_pretrained(SEAMLESS_MODEL_ID, torch_dtype="auto")
+    processor = AutoProcessor.from_pretrained(SEAMLESS_MODEL_ID, cache_dir=settings.MODEL_CACHE_DIR)
+    model = SeamlessM4TModel.from_pretrained(SEAMLESS_MODEL_ID, torch_dtype="auto", cache_dir=settings.MODEL_CACHE_DIR)
     if torch.cuda.is_available():
         model = model.cuda()
     model.eval()
@@ -111,6 +111,7 @@ def _get_qwen3_asr_model():
         device_map=device_map,
         max_inference_batch_size=32,
         max_new_tokens=256,
+        cache_dir=settings.MODEL_CACHE_DIR,
     )
     return _qwen3_asr_model
 
@@ -158,9 +159,10 @@ def _get_vibevoice_model_and_processor():
     # from_pretrained uses cache by default; next runs load from cache
     model = VibeVoiceForASRTraining.from_pretrained(
         VIBEVOICE_MODEL_ID,
-        torch_dtype="auto",
+        dtype="auto",
+        cache_dir=settings.MODEL_CACHE_DIR,
     )
-    processor = AutoProcessor.from_pretrained(VIBEVOICE_MODEL_ID)
+    processor = AutoProcessor.from_pretrained(VIBEVOICE_MODEL_ID, cache_dir=settings.MODEL_CACHE_DIR)
     if torch.cuda.is_available():
         model = model.cuda()
     model.eval()
@@ -232,27 +234,143 @@ def call_groq_ai(prompt: str, model_name: str = None) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
+
+# -----------------------------------------------------------------------------
+# Whisper (Hugging Face): lazy-loaded for meeting transcription.
+# Model is downloaded once and then loaded from cache (~/.cache/huggingface/hub).
+# -----------------------------------------------------------------------------
+_whisper_model = None
+_whisper_processor = None
+# Switched to Distil-Whisper Large V3 for better performance/memory usage
+WHISPER_MODEL_ID = "distil-whisper/distil-large-v3"
+# Alternative models:
+# WHISPER_MODEL_ID = "openai/whisper-large-v3" 
+# WHISPER_MODEL_ID = "openai/whisper-medium"
+
+def _get_whisper_model_and_processor():
+    """Load Whisper model and processor once; reuse from cache on subsequent calls."""
+    global _whisper_model, _whisper_processor
+    if _whisper_model is not None and _whisper_processor is not None:
+        return _whisper_model, _whisper_processor
+
+    from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq  # type: ignore
+    import torch  # type: ignore
+
+    processor = AutoProcessor.from_pretrained(WHISPER_MODEL_ID, cache_dir=settings.MODEL_CACHE_DIR)
+    model = AutoModelForSpeechSeq2Seq.from_pretrained(
+        WHISPER_MODEL_ID, 
+        dtype="auto", 
+        low_cpu_mem_usage=True, 
+        use_safetensors=True,
+        cache_dir=settings.MODEL_CACHE_DIR
+    )
+    
+    if torch.cuda.is_available():
+        model = model.to("cuda")
+    
+    model.eval()
+    _whisper_model = model
+    _whisper_processor = processor
+    return _whisper_model, _whisper_processor
+
 def transcribe_audio(file_buffer) -> str:
     """
-    Transcribe audio file using Groq Whisper.
-    file_buffer: file-like object with .name attribute (needed by Groq client)
+    Transcribe audio file using Local Whisper (Offline).
     """
-    if not groq_client:
-        return "Error: missing dependency 'groq'. Please install it."
-    if not groq_client.api_key:
-        return "Error: GROQ_API_KEY not set."
+    # -------------------------------------------------------------------------
+    # API Implementation (Commented out as requested)
+    # -------------------------------------------------------------------------
+    # if not groq_client:
+    #     return "Error: missing dependency 'groq'. Please install it."
+    # if not groq_client.api_key:
+    #     return "Error: GROQ_API_KEY not set."
+    # 
+    # try:
+    #     transcription = groq_client.audio.transcriptions.create(
+    #         file=file_buffer,
+    #         model="whisper-large-v3",
+    #         response_format="json",
+    #         language="en",
+    #         temperature=0.0
+    #     )
+    #     return transcription.text
+    # except Exception as e:
+    #     return f"Error transcription failed: {str(e)}"
+    # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
+    # Local Implementation (Hugging Face Transformers)
+    # -------------------------------------------------------------------------
+    try:
+        import torch
+        import librosa
+        import numpy as np
+    except ImportError as e:
+        return f"Error: install dependencies (pip install torch librosa numpy). {e}"
 
     try:
-        transcription = groq_client.audio.transcriptions.create(
-            file=file_buffer,
-            model="whisper-large-v3",
-            response_format="json",
-            language="en",
-            temperature=0.0
-        )
-        return transcription.text
+        model, processor = _get_whisper_model_and_processor()
+        
+        # Load audio from file buffer
+        # Librosa expects a file path or file-like object. 
+        # file_buffer from FastAPI UploadFile is SpooledTemporaryFile.
+        # It might have a .file attribute or be readable directly.
+        # Safe way: save to temp file or read bytes.
+        # Librosa load from file-like object requires soundfile.
+        
+        import soundfile as sf
+        
+        # Check if file_buffer is a tuple (filename, file_obj) - common pattern in this app
+        if isinstance(file_buffer, tuple):
+            f = file_buffer[1]
+        # Check if file_buffer has a 'file' attribute (FastAPI UploadFile)
+        elif hasattr(file_buffer, "file"):
+            f = file_buffer.file
+        else:
+            f = file_buffer
+        
+        # Reset pointer just in case
+        if hasattr(f, "seek"):
+            f.seek(0)
+            
+        # Load audio using soundfile (faster/safer for file-like objects)
+        audio_data, sample_rate = sf.read(f)
+        
+        # Convert to float32 if needed
+        if audio_data.dtype != np.float32:
+            audio_data = audio_data.astype(np.float32)
+            
+        # Convert stereo to mono if needed
+        if len(audio_data.shape) > 1:
+            audio_data = audio_data.mean(axis=1)
+            
+        # Resample to 16000Hz (Whisper requirement)
+        if sample_rate != 16000:
+            import librosa
+            audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+            
+        # Prepare inputs
+        inputs = processor(audio_data, sampling_rate=16000, return_tensors="pt")
+        
+        # Move inputs to GPU if available
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Ensure input features match model's dtype (e.g. float16 on GPU)
+        input_features = inputs.input_features.to(device, dtype=model.dtype)
+        
+        # Generate attention mask (1 for real input, 0 for padding)
+        # Whisper processor typically handles this, but for explicit control:
+        attention_mask = torch.ones(input_features.shape, device=device, dtype=torch.long)
+
+        # Generate (transcribe)
+        with torch.no_grad():
+            generated_ids = model.generate(input_features, attention_mask=attention_mask, language="en", task="transcribe")
+            
+        # Decode
+        transcription = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        return transcription.strip()
+
     except Exception as e:
-        return f"Error transcription failed: {str(e)}"
+        return f"Error local transcription failed: {str(e)}"
 
 
 def format_meeting_transcription(transcript: str, model_name: str | None = None) -> str:

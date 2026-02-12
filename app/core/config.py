@@ -15,5 +15,10 @@ class Settings:
     QDRANT_GROUP_COLLECTION: str = os.getenv(
         "QDRANT_GROUP_COLLECTION", "group_chats"
     )
+    
+    # Model Cache Directory (local project folder)
+    # This logic assumes app/core/config.py is 2 levels deep from app root, so 3 levels from project root
+    PROJECT_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    MODEL_CACHE_DIR: str = os.path.join(PROJECT_ROOT, "models")
 
 settings = Settings()
