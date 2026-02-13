@@ -24,6 +24,7 @@ from ...services.ai_service import (
     transcribe_audio,
     transcribe_audio_vibevoice,
     transcribe_audio_seamless_m4t,
+    transcribe_audio_whisper_local,
     format_meeting_transcription,
 )
 from ...services.summarizer import generate_chat_summary, generate_text_summary
@@ -78,7 +79,7 @@ class MeetingAudioFileRequest(BaseModel):
 
     filename: str
     model: Optional[str] = None  # LLM model for speaker formatting
-    asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium
+    asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | openai/whisper-large-v3 (local) | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -710,8 +711,11 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
+        elif asr_model in ("openai/whisper-large-v3", "whisper-large-v3"):
+            # Local Whisper Large V3 (Hugging Face); no fallback — surface errors for testing
+            raw_transcription = await run_in_threadpool(transcribe_audio_whisper_local, str(file_path))
         else:
-            # default: whisper-large-v3 (Groq)
+            # default: Groq Whisper API
             with open(file_path, "rb") as audio_file:
                 raw_transcription = transcribe_audio((request.filename, audio_file))
 

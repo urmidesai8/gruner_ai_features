@@ -14,6 +14,36 @@ from app.core.config import settings
 # -----------------------------------------------------------------------------
 _loaded_pipelines = {}
 
+# Seq2Seq (text2text) is not a pipeline task in recent transformers; we load model + tokenizer directly.
+_loaded_seq2seq = {}
+
+
+def _get_seq2seq_model(model_id: str):
+    """
+    Load Seq2Seq model and tokenizer for smart replies (Flan-T5, BART, etc.).
+    Uses AutoModelForSeq2SeqLM since pipeline(task='text2text-generation') was removed.
+    """
+    global _loaded_seq2seq
+    if model_id in _loaded_seq2seq:
+        return _loaded_seq2seq[model_id]
+
+    print(f"Loading local model for text2text-generation: {model_id}...")
+    cache_dir = getattr(settings, "MODEL_CACHE_DIR", None)
+    model_kwargs = {"cache_dir": cache_dir} if cache_dir else {}
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_id, **model_kwargs)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id, **model_kwargs)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device)
+        model.eval()
+        _loaded_seq2seq[model_id] = {"model": model, "tokenizer": tokenizer}
+        return _loaded_seq2seq[model_id]
+    except Exception as e:
+        print(f"Error loading model {model_id} for text2text-generation: {e}")
+        return None
+
+
 def _get_pipeline(task: str, model_id: str):
     """
     Get or create a pipeline for a specific task and model.
@@ -28,20 +58,16 @@ def _get_pipeline(task: str, model_id: str):
     print(f"Loading local model for {task}: {model_id}...")
     
     device = 0 if torch.cuda.is_available() else -1
-    model_kwargs = {"cache_dir": settings.MODEL_CACHE_DIR}
+    model_kwargs = {"cache_dir": getattr(settings, "MODEL_CACHE_DIR", None)}
+    if not model_kwargs["cache_dir"]:
+        model_kwargs = {}
     
     try:
-        # Specific handling for different tasks/models if needed
+        # text2text-generation is not a valid pipeline task in recent transformers; use _get_seq2seq_model
         if task == "text2text-generation":
-            # For Smart Replies (Flan-T5, BART, BLOOMZ)
-            pipe = pipeline(
-                task, 
-                model=model_id, 
-                device=device, 
-                model_kwargs=model_kwargs
-            )
+            return _get_seq2seq_model(model_id)
             
-        elif task == "ner":
+        if task == "ner":
             # For Reminders (BERT-NER)
             pipe = pipeline(
                 "ner", 
@@ -85,32 +111,43 @@ def _get_pipeline(task: str, model_id: str):
 
 def generate_smart_replies_local(messages: list, model_id: str) -> list:
     """
-    Generate smart replies using a local Seq2Seq model (e.g., Flan-T5).
+    Generate smart replies using a local Seq2Seq model (e.g., Flan-T5, BART).
+    Uses model + tokenizer directly (no pipeline) since text2text-generation was removed.
     """
     if not messages:
         return []
 
-    # Prepare input context (last few messages)
-    # Flan-T5 works best with a clear instruction
     last_msg = messages[-1].message
-    
     prompt = f"Reply to this message: {last_msg}"
-    
-    pipe = _get_pipeline("text2text-generation", model_id)
-    if not pipe:
+
+    loaded = _get_pipeline("text2text-generation", model_id)
+    if not loaded or "model" not in loaded or "tokenizer" not in loaded:
         return []
 
+    model = loaded["model"]
+    tokenizer = loaded["tokenizer"]
+
     try:
-        # Generate a few variations
-        outputs = pipe(
-            prompt, 
-            max_length=50, 
-            num_return_sequences=3, 
-            do_sample=True, 
-            temperature=0.7,
-            num_beams=5
+        inputs = tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=512,
         )
-        return [out['generated_text'].strip() for out in outputs]
+        inputs = {k: v.to(model.device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            output_ids = model.generate(
+                **inputs,
+                max_new_tokens=50,
+                num_return_sequences=3,
+                do_sample=True,
+                temperature=0.7,
+                num_beams=1,  # do_sample=True typically uses num_beams=1
+            )
+
+        replies = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+        return [t.strip() for t in replies if t.strip()]
     except Exception as e:
         print(f"Smart reply generation failed: {e}")
         return []
