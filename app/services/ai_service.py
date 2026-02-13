@@ -78,63 +78,6 @@ def transcribe_audio_seamless_m4t(audio_path: str, tgt_lang: str = "eng") -> str
         return f"Error transcription failed: {str(e)}"
 
 # -----------------------------------------------------------------------------
-# Qwen3-ASR (qwen-asr): lazy-loaded for meeting transcription.
-# Model is downloaded once and then loaded from cache.
-# -----------------------------------------------------------------------------
-_qwen3_asr_model = None
-QWEN3_ASR_MODEL_ID = "Qwen/Qwen3-ASR-1.7B"
-
-
-def _get_qwen3_asr_model():
-    """Load Qwen3-ASR model once; reuse on subsequent calls."""
-    global _qwen3_asr_model
-    if _qwen3_asr_model is not None:
-        return _qwen3_asr_model
-
-    try:
-        import torch  # type: ignore
-        from qwen_asr import Qwen3ASRModel  # type: ignore
-    except ImportError as e:
-        raise RuntimeError(f"Missing dependency for Qwen3-ASR: {e}") from e
-
-    # Prefer GPU if available; otherwise fall back to CPU.
-    if torch.cuda.is_available():
-        device_map = "cuda:0"
-        dtype = torch.bfloat16
-    else:
-        device_map = "cpu"
-        dtype = torch.float32
-
-    _qwen3_asr_model = Qwen3ASRModel.from_pretrained(
-        QWEN3_ASR_MODEL_ID,
-        dtype=dtype,
-        device_map=device_map,
-        max_inference_batch_size=32,
-        max_new_tokens=256,
-    )
-    return _qwen3_asr_model
-
-
-def transcribe_audio_qwen3_asr(audio_path: str, language: str | None = None) -> str:
-    """
-    Transcribe an audio file using Qwen/Qwen3-ASR-1.7B.
-    Returns an error string (starting with "Error:") on failure.
-    """
-    import os
-    if not os.path.isfile(audio_path):
-        return f"Error: file not found: {audio_path}"
-
-    try:
-        model = _get_qwen3_asr_model()
-        results = model.transcribe(audio=audio_path, language=language)
-        if not results:
-            return "Error: empty transcription from Qwen3-ASR."
-        text = (getattr(results[0], "text", "") or "").strip()
-        return text or "Error: empty transcription from Qwen3-ASR."
-    except Exception as e:
-        return f"Error transcription failed: {str(e)}"
-
-# -----------------------------------------------------------------------------
 # VibeVoice-ASR (Hugging Face): lazy-loaded for meeting transcription.
 # Model is downloaded once and then loaded from cache (~/.cache/huggingface/hub).
 # -----------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import uuid
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 from ...models.schemas import (
     FeatureRequest,
     AIAnalysisRequest,
@@ -23,7 +24,6 @@ from ...services.ai_service import (
     transcribe_audio,
     transcribe_audio_vibevoice,
     transcribe_audio_seamless_m4t,
-    transcribe_audio_qwen3_asr,
     format_meeting_transcription,
 )
 from ...services.summarizer import generate_chat_summary, generate_text_summary
@@ -72,7 +72,7 @@ class MeetingAudioFileRequest(BaseModel):
 
     filename: str
     model: Optional[str] = None  # LLM model for speaker formatting
-    asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium | Qwen/Qwen3-ASR-1.7B
+    asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -665,18 +665,13 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
 
         # 1) Raw transcription: dispatch by selected ASR model
         asr_model = (request.asr_model or "whisper-large-v3").strip()
-        if asr_model == "Qwen/Qwen3-ASR-1.7B":
-            raw_transcription = transcribe_audio_qwen3_asr(str(file_path))
-            if raw_transcription.startswith("Error"):
-                with open(file_path, "rb") as audio_file:
-                    raw_transcription = transcribe_audio((request.filename, audio_file))
-        elif asr_model in ("facebook/seamless-m4t-medium", "facebook/hf-seamless-m4t-medium"):
-            raw_transcription = transcribe_audio_seamless_m4t(str(file_path))
+        if asr_model in ("facebook/seamless-m4t-medium", "facebook/hf-seamless-m4t-medium"):
+            raw_transcription = await run_in_threadpool(transcribe_audio_seamless_m4t, str(file_path))
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
         elif asr_model == "microsoft/VibeVoice-ASR":
-            raw_transcription = transcribe_audio_vibevoice(str(file_path))
+            raw_transcription = await run_in_threadpool(transcribe_audio_vibevoice, str(file_path))
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))

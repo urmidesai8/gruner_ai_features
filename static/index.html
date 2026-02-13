@@ -598,6 +598,17 @@
                     <option value="zh">Chinese</option>
                     <option value="ja">Japanese</option>
                 </select>
+                <label for="user1TranslationModel"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin: 10px 0 5px;">Translation
+                    model:</label>
+                <select id="user1TranslationModel"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">Default</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="tencent/HY-MT1.5-1.8B">Tencent HY-MT1.5 1.8B (HF)</option>
+                    <option value="google-t5/t5-base">Google T5 Base</option>
+                </select>
             </div>
             <textarea id="input1" placeholder="Type as User 1..."></textarea>
             <div class="audio-controls" style="margin-bottom: 5px; display: flex; gap: 5px;">
@@ -675,6 +686,17 @@
                     <option value="hi">Hindi</option>
                     <option value="zh">Chinese</option>
                     <option value="ja">Japanese</option>
+                </select>
+                <label for="user2TranslationModel"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin: 10px 0 5px;">Translation
+                    model:</label>
+                <select id="user2TranslationModel"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">Default</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="tencent/HY-MT1.5-1.8B">Tencent HY-MT1.5 1.8B (HF)</option>
+                    <option value="google-t5/t5-base">Google T5 Base</option>
                 </select>
             </div>
             <textarea id="input2" placeholder="Type as User 2..."></textarea>
@@ -847,8 +869,12 @@
             if (!aiEnabled) {
                 const user1Lang = document.getElementById('user1Language');
                 const user2Lang = document.getElementById('user2Language');
+                const user1Model = document.getElementById('user1TranslationModel');
+                const user2Model = document.getElementById('user2TranslationModel');
                 if (user1Lang) user1Lang.value = '';
                 if (user2Lang) user2Lang.value = '';
+                if (user1Model) user1Model.value = '';
+                if (user2Model) user2Model.value = '';
                 // Remove all existing auto-translations
                 document.querySelectorAll('.auto-translation-box').forEach(el => el.remove());
             }
@@ -1204,7 +1230,6 @@
         async function translateAudioMsg(filename, elementId) {
             const container = document.getElementById(elementId);
             container.innerHTML = 'Translating...';
-            const model = getSelectedModel();
 
             // Determine receiving user language
             // Since we don't know who is viewing (simulated one-screen), 
@@ -1230,6 +1255,7 @@
             const sender = msgObj.sender === user1Name ? 'user1' : 'user2';
             const receiver = sender === 'user1' ? 'user2' : 'user1';
             const langSelect = document.getElementById(`${receiver}Language`);
+            const model = getUserTranslationModel(receiver);
 
             if (!langSelect || !langSelect.value) {
                 container.innerHTML = `<span style="color:orange">Please select a language for ${receiver === 'user1' ? user1Name : user2Name}.</span>`;
@@ -1739,7 +1765,7 @@
             const targetLangLabel = langSelect
                 ? langSelect.options[langSelect.selectedIndex].text
                 : targetLang.toUpperCase();
-            const model = getSelectedModel();
+            const model = null;
 
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
@@ -2146,7 +2172,7 @@
             const targetLang = langSelect.value;
             const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
             const results = document.getElementById('transcriptionTranslationResult');
-            const model = getSelectedModel();
+            const model = null;
 
             // Show loading state
             results.innerHTML = `<div style="text-align:center; padding:10px;">Translating to ${targetLangLabel}...</div>`;
@@ -2224,7 +2250,7 @@
             }
 
             try {
-                const model = getSelectedModel();
+                const model = getUserTranslationModel(receivingUser);
                 const payload = [{
                     id: messageObj.id,
                     text: messageObj.message,
@@ -2232,6 +2258,7 @@
                     model: model
                 }];
 
+                const startTime = performance.now();
                 const response = await fetch('/api/features/translate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2244,6 +2271,7 @@
                 }
 
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
                 const translations = data && data.translations ? data.translations : {};
                 const translation = translations[messageObj.id];
 
@@ -2257,7 +2285,7 @@
                     const translationDiv = document.createElement('div');
                     translationDiv.className = 'auto-translation-box';
                     translationDiv.innerHTML = `
-                        <div class="translation-header">${receivingUserName} (${targetLangLabel})</div>
+                        <div class="translation-header">${receivingUserName} (${targetLangLabel}) · ${latencySeconds}s</div>
                         <div class="translation-body">${escapeHtml(translation.translated_text)}</div>
                     `;
 
@@ -2320,6 +2348,14 @@
             return "openai/gpt-oss-120b";
         }
 
+        // Per-user translation model selector (for auto-translation)
+        function getUserTranslationModel(userKey) {
+            const el = document.getElementById(`${userKey}TranslationModel`);
+            if (!el) return null;
+            const v = (el.value || '').trim();
+            return v ? v : null;
+        }
+
 
 
 
@@ -2335,6 +2371,13 @@
             }
         });
 
+        document.getElementById('user1TranslationModel').addEventListener('change', function () {
+            const lang = document.getElementById('user1Language');
+            if (aiEnabled && lang && lang.value) {
+                retranslateMessagesForUser('user2', 'user1');
+            }
+        });
+
         document.getElementById('user2Language').addEventListener('change', function () {
             if (aiEnabled && this.value) {
                 // Re-translate all messages from User 1
@@ -2342,6 +2385,13 @@
             } else {
                 // Remove all auto-translations for User 2
                 removeAutoTranslationsForUser('user2');
+            }
+        });
+
+        document.getElementById('user2TranslationModel').addEventListener('change', function () {
+            const lang = document.getElementById('user2Language');
+            if (aiEnabled && lang && lang.value) {
+                retranslateMessagesForUser('user1', 'user2');
             }
         });
 
