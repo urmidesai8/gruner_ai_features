@@ -15,5 +15,6 @@ class Settings:
     QDRANT_GROUP_COLLECTION: str = os.getenv(
         "QDRANT_GROUP_COLLECTION", "group_chats"
     )
+    MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", None)
 
 settings = Settings()

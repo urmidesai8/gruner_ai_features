@@ -571,7 +571,8 @@
         <span id="aiStatusText" style="color: #4caf50; font-weight: bold;">ON</span>
     </div>
 
-    <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; margin-top:60px;">
+    <div
+        style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; margin-top:60px;">
         <h1 style="margin:0;">Dual-User Simulation & AI Features</h1>
         <button onclick="window.location.href='/static/meeting_transcription.html'"
             style="padding:8px 14px; border-radius:999px; border:none; cursor:pointer; font-weight:600; font-size:0.9rem; background:#111827; color:white; box-shadow:0 8px 18px rgba(15,23,42,0.35);">
@@ -829,6 +830,72 @@
 
         // AI state tracking
         let aiEnabled = true;
+
+        // Model Definitions for Dynamic Selection
+        const MODEL_OPTIONS = {
+            'none': [],
+            'smart_replies': [
+                { value: 'google/flan-t5-base', text: 'Flan-T5 Base (Google) - Default' },
+                { value: 'facebook/bart-large', text: 'BART Large (Facebook)' },
+                { value: 'bigscience/bloomz-7b1', text: 'BLOOMZ 7B1 (BigScience)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'reminders': [
+                { value: 'dslim/bert-ner-bertbaseuncased-conll03', text: 'BERT NER (dslim) - Default' },
+                { value: 'bert-base-uncased', text: 'BERT Base Uncased' },
+                { value: 'xlm-roberta-base', text: 'XLM-RoBERTa (Multilingual)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'prioritize': [
+                { value: 'sentence-transformers/all-mpnet-base-v2', text: 'MPNet Base V2 (Embeddings) - Default' },
+                { value: 'distilbert-base-uncased-finetuned-sst-2-english', text: 'DistilBERT SST-2 (Sentiment)' },
+                { value: 'cross-encoder/ms-marco-bert-base-dot-prod', text: 'MS MARCO BERT (Ranking)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'moderate': [
+                { value: 'facebook/roberta-base-openai-detector', text: 'RoBERTa OpenAI Detector (FaceBook) - Default' },
+                { value: 'unitary/unbiased-toxic-roberta', text: 'Unbiased Toxic RoBERTa (Unitary)' },
+                { value: 'bert-base-multilingual-cased', text: 'BERT Multilingual' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'summary': [
+                { value: 'openai/gpt-oss-120b', text: 'GPT OSS 120B (Offline Default)' },
+                { value: 'llama-3.3-70b-versatile', text: 'Llama 3.3 70B (Groq Cloud)' }
+            ],
+            'tasks': [
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'translate': [
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' },
+                { value: 'google-t5/t5-base', text: 'Google T5 Base (Local)' },
+                { value: 'facebook/nllb-200-1.3B', text: 'NLLB-200 1.3B (Local)' }
+            ],
+            'transcribe': []
+        };
+
+        function updateModelOptions() {
+            const feature = document.getElementById('featureSelect').value;
+            const modelSelect = document.getElementById('analysisModelSelect');
+            // If feature is none or transcribe, keep simple or clear
+            if (feature === 'none' || feature === 'transcribe') {
+                // Maybe keep default set or clear? Let's leave it as is or reset to default
+                if (feature === 'none') modelSelect.innerHTML = '<option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>';
+                return;
+            }
+
+            const options = MODEL_OPTIONS[feature] || [];
+            if (options.length === 0) return; // Don't change if no mapping found
+
+            // Clear existing
+            modelSelect.innerHTML = '';
+
+            options.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.text;
+                modelSelect.appendChild(option);
+            });
+        }
 
         // Utility function to escape HTML
         function escapeHtml(text) {
@@ -1315,12 +1382,16 @@
         // --- AI Features ---
 
         // Show/hide conditional controls based on selected feature
+        // Show/hide conditional controls based on selected feature
         document.getElementById('featureSelect').addEventListener('change', function () {
             const feature = this.value;
             const translationLabel = document.getElementById('translationLanguageLabel');
             const translationSelect = document.getElementById('translationLanguage');
             const toneLabel = document.getElementById('replyToneLabel');
             const toneSelect = document.getElementById('replyTone');
+
+            // Update Model Dropdown
+            updateModelOptions();
 
             // Show/hide translation language selector
             if (feature === 'translate') {

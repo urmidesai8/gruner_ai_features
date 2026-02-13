@@ -40,6 +40,12 @@ from ...services.reminder_service import (
     create_reminder_from_task,
 )
 from ...services.translation_service import translate_messages_batch
+from ...services.local_feature_service import (
+    generate_smart_replies_local,
+    analyze_prioritization_local,
+    analyze_moderation_local,
+    analyze_reminders_local
+)
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -250,6 +256,14 @@ async def prioritize_messages(request: AIAnalysisRequest):
     if not filtered_messages:
         return {}
     
+    # Check if local model requested (contains '/')
+    if request.model and "/" in request.model and "openai" not in request.model:
+        # Local execution using transformers
+        results = analyze_prioritization_local(filtered_messages, request.model)
+        return JSONResponse(content=results)
+
+    # Fallback to Groq API (Original Logic)
+    # prompt code maintained below...
     prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     
@@ -294,6 +308,13 @@ async def moderate_messages(request: AIAnalysisRequest):
     if not filtered_messages:
         return {}
     
+    # Check if local model requested (contains '/')
+    if request.model and "/" in request.model and "openai" not in request.model:
+        # Local execution using transformers
+        results = analyze_moderation_local(filtered_messages, request.model)
+        return JSONResponse(content=results)
+
+    # Fallback to Groq API (Original Logic)
     prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     
@@ -356,6 +377,13 @@ async def smart_replies(request: SmartRepliesRequest):
     
     tone_instruction = tone_instructions.get(tone, tone_instructions["auto"])
     
+    # Check if local model requested (contains '/')
+    if request.model and "/" in request.model and "openai" not in request.model:
+        # Local execution using transformers
+        suggestions = generate_smart_replies_local(filtered_messages, request.model)
+        return JSONResponse(content={"suggestions": suggestions})
+
+    # Fallback to Groq API (Original Logic)
     prompt = f"""
     Generate 3 short, context-aware reply suggestions for the following message:
     "{last_msg.message}"
@@ -552,6 +580,13 @@ async def get_reminder_suggestions(
         raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
     
     try:
+        # Check if local model requested (contains '/')
+        if request.model and "/" in request.model and "openai" not in request.model:
+            # Local execution using transformers
+            result = analyze_reminders_local(chat_history.get_ai_enabled_messages(), request.model)
+            return JSONResponse(content=result)
+
+        # Fallback to Groq API (Original Logic)
         result = generate_context_based_suggestions(
             username=request.username, context_window=request.context_window, model=request.model
         )
