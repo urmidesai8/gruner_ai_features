@@ -8,10 +8,13 @@ from app.services.summarizer import groq_client  # reuse same LLM client
 
 HY_MT_MODEL_ID = "tencent/HY-MT1.5-1.8B"
 T5_MODEL_ID = "google-t5/t5-base"
+NLLB_MODEL_ID = "facebook/nllb-200-1.3B"
 _hy_mt_tokenizer = None
 _hy_mt_model = None
 _t5_tokenizer = None
 _t5_model = None
+_nllb_tokenizer = None
+_nllb_model = None
 
 # Language code -> name for HY-MT prompt (model expects language names in the instruction)
 _LANG_CODE_TO_NAME = {
@@ -19,6 +22,14 @@ _LANG_CODE_TO_NAME = {
     "ja": "Japanese", "ko": "Korean", "hi": "Hindi", "pt": "Portuguese", "ru": "Russian",
     "ar": "Arabic", "it": "Italian", "nl": "Dutch", "pl": "Polish", "tr": "Turkish",
     "vi": "Vietnamese", "th": "Thai", "id": "Indonesian", "ms": "Malay", "uk": "Ukrainian",
+}
+
+# Language code -> NLLB-200 language code (lang_script format)
+_LANG_CODE_TO_NLLB = {
+    "en": "eng_Latn", "es": "spa_Latn", "fr": "fra_Latn", "de": "deu_Latn", "zh": "zho_Hans",
+    "ja": "jpn_Jpan", "ko": "kor_Hang", "hi": "hin_Deva", "pt": "por_Latn", "ru": "rus_Cyrl",
+    "ar": "arb_Arab", "it": "ita_Latn", "nl": "nld_Latn", "pl": "pol_Latn", "tr": "tur_Latn",
+    "vi": "vie_Latn", "th": "tha_Thai", "id": "ind_Latn", "uk": "ukr_Cyrl",
 }
 
 
@@ -134,6 +145,65 @@ def _translate_text_t5(text: str, target_language: str) -> dict:
     return {"translated_text": translated, "detected_language": "unknown"}
 
 
+def _get_nllb_model():
+    """Lazy-load tokenizer and model for facebook/nllb-200-1.3B (local transformers)."""
+    global _nllb_tokenizer, _nllb_model
+    if _nllb_model is not None:
+        return _nllb_tokenizer, _nllb_model
+
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+    import torch
+
+    _nllb_tokenizer = AutoTokenizer.from_pretrained(NLLB_MODEL_ID)
+    _nllb_model = AutoModelForSeq2SeqLM.from_pretrained(NLLB_MODEL_ID)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _nllb_model = _nllb_model.to(device)
+    _nllb_model.eval()
+    return _nllb_tokenizer, _nllb_model
+
+
+def _translate_text_nllb(text: str, target_language: str) -> dict:
+    """Translate using NLLB-200 (forced_bos_token_id for target language)."""
+    import torch
+
+    if not text:
+        return {"translated_text": "", "detected_language": "unknown"}
+
+    tokenizer, model = _get_nllb_model()
+    tgt_lang = target_language.strip().lower()
+    nllb_code = _LANG_CODE_TO_NLLB.get(tgt_lang, "eng_Latn")
+    try:
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(nllb_code)
+    except Exception:
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids("eng_Latn")
+
+    device = next(model.parameters()).device
+    inputs = tokenizer(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=512,
+    )
+    gen_kwargs = {
+        "input_ids": inputs["input_ids"].to(device),
+        "attention_mask": inputs["attention_mask"].to(device),
+    }
+
+    with torch.no_grad():
+        out = model.generate(
+            **gen_kwargs,
+            max_length=150,
+            min_length=0,
+            num_beams=2,
+            length_penalty=2.0,
+            early_stopping=True,
+            forced_bos_token_id=forced_bos_token_id,
+        )
+
+    translated = tokenizer.decode(out[0], skip_special_tokens=True).strip()
+    return {"translated_text": translated, "detected_language": "unknown"}
+
+
 def translate_text(text: str, target_language: str = "en", model: str = None) -> dict:
     """Translate a single block of text into a target language using the LLM.
 
@@ -158,6 +228,13 @@ def translate_text(text: str, target_language: str = "en", model: str = None) ->
             return _translate_text_t5(text, target_language)
         except Exception as e:
             print(f"Error translating text with T5: {e}")
+            return {"translated_text": "Error during translation.", "detected_language": "unknown"}
+
+    if model == NLLB_MODEL_ID:
+        try:
+            return _translate_text_nllb(text, target_language)
+        except Exception as e:
+            print(f"Error translating text with NLLB: {e}")
             return {"translated_text": "Error during translation.", "detected_language": "unknown"}
 
     if not groq_client.api_key:
@@ -278,6 +355,18 @@ def translate_messages_batch(requests: List[Dict], model: str = None) -> Dict:
                 out[msg_id] = _translate_text_t5(item.get("text", ""), target_language)
             except Exception as e:
                 print(f"T5 batch translation error: {e}")
+                out[msg_id] = {"translated_text": "Error during translation.", "detected_language": "unknown"}
+        return {"translations": out}
+
+    if model == NLLB_MODEL_ID:
+        target_language = requests[0].get("target_language", "en")
+        out = {}
+        for item in requests:
+            msg_id = str(item.get("id"))
+            try:
+                out[msg_id] = _translate_text_nllb(item.get("text", ""), target_language)
+            except Exception as e:
+                print(f"NLLB batch translation error: {e}")
                 out[msg_id] = {"translated_text": "Error during translation.", "detected_language": "unknown"}
         return {"translations": out}
 
