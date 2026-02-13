@@ -646,6 +646,14 @@
                     <option value="translate">Language Translation</option>
                     <option value="transcribe">Audio Transcription</option>
                 </select>
+                <label for="analysisModelSelect"><strong>Model:</strong></label>
+                <select id="analysisModelSelect"
+                    style="margin-right: 10px; padding: 5px; border-radius: 5px; border: 1px solid #ccc; font-size: 0.9em;">
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B">DeepSeek R1 Distill Qwen 1.5B</option>
+                    <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+                </select>
                 <label for="translationLanguage" id="translationLanguageLabel"
                     style="display: none;"><strong>Language:</strong></label>
                 <select id="translationLanguage" style="display: none;">
@@ -1585,6 +1593,7 @@
                     model: model
                 };
 
+                const startTime = performance.now();
                 const response = await fetch('/api/features/chat-summarize', {
                     method: 'POST',
                     headers: {
@@ -1593,6 +1602,7 @@
                     body: JSON.stringify(requestBody)
                 });
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
 
                 if (!response.ok) {
                     const detail = data && data.detail ? data.detail : 'Server returned an error';
@@ -1611,35 +1621,38 @@
 
                 let html = `
                     <div class="summary-section">
+                        <p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p>
+                    </div>
+                    <div class="summary-section">
                         <h3>📋 Overview</h3>
-                        <p>${summary}</p>
+                        <p>${escapeHtml(summary)}</p>
                         <p><strong>Total Messages:</strong> ${totalMessagesCount}</p>
-                        <p><strong>Participants:</strong> ${participants.join(', ')}</p>
+                        <p><strong>Participants:</strong> ${escapeHtml(participants.join(', '))}</p>
                     </div>
                     
                     <div class="summary-section">
                         <h3>💬 What Did I Miss?</h3>
-                        <p>${unreadSummary}</p>
+                        <p>${escapeHtml(unreadSummary)}</p>
                     </div>
                     
                     <div class="summary-section">
                         <h3>📝 Key Points</h3>
                         <ul>
-                            ${bulletPoints.map(point => `<li>${point}</li>`).join('')}
+                            ${bulletPoints.map(point => `<li>${escapeHtml(point)}</li>`).join('')}
                         </ul>
                     </div>
                     
                     <div class="summary-section">
                         <h3>✅ Key Decisions</h3>
                         <ul>
-                            ${keyDecisions.map(decision => `<li>${decision}</li>`).join('')}
+                            ${keyDecisions.map(decision => `<li>${escapeHtml(decision)}</li>`).join('')}
                         </ul>
                     </div>
                     
                     <div class="summary-section">
                         <h3>🎯 Action Items</h3>
                         <ul>
-                            ${actionItems.map(action => `<li>${action}</li>`).join('')}
+                            ${actionItems.map(action => `<li>${escapeHtml(action)}</li>`).join('')}
                         </ul>
                     </div>
                 `;
@@ -2343,11 +2356,11 @@
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
 
-        // Helper to get selected model (enforcing one model as requested)
+        // Helper to get selected model for analysis (from the Model dropdown beside AI Feature)
         function getSelectedModel() {
-            // User requested to force this model for all services, 
-            // while keeping the UI list visible.
-            return "openai/gpt-oss-120b";
+            const el = document.getElementById('analysisModelSelect');
+            if (el && el.value) return el.value;
+            return "llama-3.1-8b-instant";
         }
 
         // Per-user translation model selector (for auto-translation)

@@ -1,4 +1,5 @@
 import json
+import re
 from typing import List, Optional, Set
 
 from dotenv import load_dotenv
@@ -12,6 +13,111 @@ load_dotenv()
 
 # Initialize Groq client (can be swapped for local LLM later if needed)
 groq_client = Groq(api_key=settings.GROQ_API_KEY)
+
+
+def _extract_json_from_response(response_text: str) -> str:
+    """
+    Extract a JSON object from model output that may include chain-of-thought
+    or markdown fences (e.g. ```json ... ```). Returns the substring to pass to json.loads().
+    """
+    text = response_text.strip()
+    # Remove markdown code block if present
+    if "```json" in text:
+        text = re.sub(r"^.*?```json\s*", "", text, flags=re.DOTALL)
+    if "```" in text:
+        text = re.sub(r"\s*```.*$", "", text, flags=re.DOTALL)
+    text = text.strip()
+    # If there is leading text before the first '{', take from first '{' to matching '}'
+    start = text.find("{")
+    if start == -1:
+        return text
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    # Fallback: first { to last }
+    last_brace = text.rfind("}")
+    if last_brace != -1:
+        return text[start : last_brace + 1]
+    return text[start:]
+
+# Local DeepSeek R1 Distill Qwen 1.5B (load once, use from cache)
+DEEPSEEK_R1_MODEL_ID = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+_deepseek_tokenizer = None
+_deepseek_model = None
+
+
+def _get_deepseek_r1_model():
+    """Lazy-load tokenizer and model for DeepSeek R1 Distill Qwen 1.5B."""
+    global _deepseek_tokenizer, _deepseek_model
+    if _deepseek_model is not None:
+        return _deepseek_tokenizer, _deepseek_model
+
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    import torch
+
+    _deepseek_tokenizer = AutoTokenizer.from_pretrained(DEEPSEEK_R1_MODEL_ID, trust_remote_code=True)
+    _deepseek_model = AutoModelForCausalLM.from_pretrained(DEEPSEEK_R1_MODEL_ID, trust_remote_code=True)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _deepseek_model = _deepseek_model.to(device)
+    _deepseek_model.eval()
+    return _deepseek_tokenizer, _deepseek_model
+
+
+def _generate_with_deepseek_r1(user_content: str, system_content: Optional[str] = None, max_new_tokens: int = 2000) -> str:
+    """Run inference with DeepSeek R1; returns decoded generated text only."""
+    import torch
+
+    tokenizer, model = _get_deepseek_r1_model()
+    if system_content:
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        messages = [{"role": "user", "content": user_content}]
+
+    try:
+        inputs = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            truncation=True,
+            max_length=4096,
+        )
+    except Exception:
+        # Fallback if system role not supported
+        inputs = tokenizer.apply_chat_template(
+            [{"role": "user", "content": (system_content or "") + "\n\n" + user_content}],
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            truncation=True,
+            max_length=4096,
+        )
+
+    device = next(model.parameters()).device
+    gen_kwargs = {"input_ids": inputs["input_ids"].to(device)}
+    if inputs.get("attention_mask") is not None:
+        gen_kwargs["attention_mask"] = inputs["attention_mask"].to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **gen_kwargs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    input_length = gen_kwargs["input_ids"].shape[-1]
+    return tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
 
 
 def generate_chat_summary(messages: List[dict], username: Optional[str] = None, total_messages: int = 100, model: str = None) -> dict:
@@ -101,7 +207,36 @@ Guidelines:
 
 Return the JSON response now:"""
 
+    raw_response_text: Optional[str] = None
     try:
+        if model == DEEPSEEK_R1_MODEL_ID:
+            system_content = (
+                "You are a helpful assistant that analyzes chat conversations "
+                "and provides structured summaries in JSON format. Always "
+                "return valid JSON only, no markdown code blocks, no additional text."
+            )
+            raw_response_text = _generate_with_deepseek_r1(prompt, system_content=system_content, max_new_tokens=2000)
+            response_text = _extract_json_from_response(raw_response_text)
+            llm_summary = json.loads(response_text)
+            result = {
+                "summary": llm_summary.get(
+                    "summary",
+                    f"Chat summary: {total_messages_count} messages from "
+                    f"{len(participants)} participant(s): {', '.join(participants)}",
+                ),
+                "bullet_points": llm_summary.get("bullet_points", []),
+                "key_decisions": llm_summary.get("key_decisions", []),
+                "action_items": llm_summary.get("action_items", []),
+                "unread_summary": llm_summary.get("unread_summary", "Summary generated successfully."),
+                "total_messages": total_messages_count,
+                "participants": list(participants),
+            }
+            if not result["key_decisions"]:
+                result["key_decisions"] = ["No explicit decisions identified in the conversation."]
+            if not result["action_items"]:
+                result["action_items"] = ["No action items identified in the conversation."]
+            return result
+
         if not groq_client.api_key:
             raise ValueError(
                 "GROQ_API_KEY not set. Please set it in your environment variables or .env file."
@@ -136,17 +271,9 @@ Return the JSON response now:"""
 
         completion = groq_client.chat.completions.create(**api_params)
 
-        # Parse the response
-        response_text = completion.choices[0].message.content.strip()
-
-        if response_text.startswith("```json"):
-            response_text = response_text[7:]
-        elif response_text.startswith("```"):
-            response_text = response_text[3:]
-        if response_text.endswith("```"):
-            response_text = response_text[:-3]
-        response_text = response_text.strip()
-
+        # Parse the response (extract JSON in case of chain-of-thought or markdown)
+        raw_response_text = completion.choices[0].message.content.strip()
+        response_text = _extract_json_from_response(raw_response_text)
         llm_summary = json.loads(response_text)
 
         result = {
@@ -179,13 +306,38 @@ Return the JSON response now:"""
     except json.JSONDecodeError as e:
         print(f"Error parsing LLM JSON response: {e}")
         print(f"Response was: {response_text}")
+        # Retry by extracting JSON from raw response (e.g. chain-of-thought before ```json)
+        if raw_response_text:
+            try:
+                extracted = _extract_json_from_response(raw_response_text)
+                llm_summary = json.loads(extracted)
+                result = {
+                    "summary": llm_summary.get(
+                        "summary",
+                        f"Chat summary: {total_messages_count} messages from "
+                        f"{len(participants)} participant(s): {', '.join(participants)}",
+                    ),
+                    "bullet_points": llm_summary.get("bullet_points", []),
+                    "key_decisions": llm_summary.get("key_decisions", []),
+                    "action_items": llm_summary.get("action_items", []),
+                    "unread_summary": llm_summary.get("unread_summary", "Summary generated successfully."),
+                    "total_messages": total_messages_count,
+                    "participants": list(participants),
+                }
+                if not result["key_decisions"]:
+                    result["key_decisions"] = ["No explicit decisions identified in the conversation."]
+                if not result["action_items"]:
+                    result["action_items"] = ["No action items identified in the conversation."]
+                return result
+            except (json.JSONDecodeError, TypeError):
+                pass
         return {
             "summary": (
                 f"Chat summary: {total_messages_count} messages from "
                 f"{len(participants)} participant(s): {', '.join(participants)}"
             ),
             "bullet_points": [
-                f"{msg['sender']}: {msg['message'][:80]}..."
+                f"{msg['sender']}: {msg['message']}"
                 for msg in chat_messages[:10]
             ],
             "key_decisions": ["Error parsing LLM response. Please try again."],
@@ -247,6 +399,19 @@ Guidelines:
 """
 
     try:
+        if model == DEEPSEEK_R1_MODEL_ID:
+            system_content = "You are a helpful assistant that analyzes text and provides structured JSON summaries."
+            response_text = _generate_with_deepseek_r1(prompt, system_content=system_content, max_new_tokens=1500)
+            response_text = _extract_json_from_response(response_text)
+            llm_summary = json.loads(response_text)
+            return {
+                "summary": llm_summary.get("summary", "Summary generated."),
+                "bullet_points": llm_summary.get("bullet_points", []),
+                "key_decisions": llm_summary.get("key_decisions", []),
+                "action_items": llm_summary.get("action_items", []),
+                "unread_summary": "N/A for transcript",
+            }
+
         if not groq_client.api_key:
              return {"summary": "Error: GROQ_API_KEY not set."}
 
