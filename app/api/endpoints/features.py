@@ -22,6 +22,8 @@ from ...models.schemas import (
 from ...services.ai_service import (
     call_groq_ai,
     transcribe_audio,
+    transcribe_audio_with_timestamps,
+    transcribe_audio_whisper_local,
     transcribe_audio_vibevoice,
     transcribe_audio_seamless_m4t,
     format_meeting_transcription,
@@ -675,18 +677,25 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
+            segments = []
+        elif asr_model in ("whisper-large-v3", "openai/whisper-small"):
+            # Local Whisper (Transformers): load once per model, then from cache
+            raw_transcription, segments = await run_in_threadpool(
+                transcribe_audio_whisper_local, str(file_path), asr_model
+            )
         else:
-            # default: whisper-large-v3 (Groq)
+            # Fallback: Groq Whisper
             with open(file_path, "rb") as audio_file:
-                raw_transcription = transcribe_audio((request.filename, audio_file))
+                raw_transcription, segments = transcribe_audio_with_timestamps((request.filename, audio_file))
 
         if isinstance(raw_transcription, str) and raw_transcription.startswith("Error"):
             raise HTTPException(status_code=500, detail=raw_transcription)
 
-        # 2) Meeting-style formatted transcription (speaker separated)
+        # 2) Meeting-style formatted transcription (speaker separated; with timestamps for whisper-large-v3)
         formatted_transcription = format_meeting_transcription(
             raw_transcription,
             model_name=request.model,
+            segments=segments if segments else None,
         )
 
         if isinstance(formatted_transcription, str) and formatted_transcription.startswith("Error"):
@@ -695,6 +704,7 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
                 content={
                     "transcription": raw_transcription,
                     "formatted_transcription": None,
+                    "segments": segments if segments else None,
                     "notice": "Meeting formatting failed; returning raw transcription only.",
                 }
             )
@@ -703,6 +713,7 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
             content={
                 "transcription": raw_transcription,
                 "formatted_transcription": formatted_transcription,
+                "segments": segments if segments else None,
             }
         )
     except HTTPException:

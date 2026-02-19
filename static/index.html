@@ -652,7 +652,7 @@
                     <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
                     <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
                     <option value="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B">DeepSeek R1 Distill Qwen 1.5B</option>
-                    <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+                    <option value="LiquidAI/LFM2.5-1.2B-Instruct" id="analysisModelOptionLfm">LiquidAI LFM2.5 1.2B Instruct</option>
                 </select>
                 <label for="translationLanguage" id="translationLanguageLabel"
                     style="display: none;"><strong>Language:</strong></label>
@@ -1315,12 +1315,33 @@
         // --- AI Features ---
 
         // Show/hide conditional controls based on selected feature
+        function updateModelDropdownForFeature() {
+            const feature = document.getElementById('featureSelect').value;
+            const modelSelect = document.getElementById('analysisModelSelect');
+            const lfmOption = document.getElementById('analysisModelOptionLfm');
+            if (lfmOption) {
+                // Hide LFM for Extract Tasks only (LFM not supported there); show for Chat Summary and others
+                if (feature === 'tasks') {
+                    lfmOption.style.display = 'none';
+                    lfmOption.disabled = true;
+                    if (modelSelect && modelSelect.value === 'LiquidAI/LFM2.5-1.2B-Instruct') {
+                        modelSelect.value = 'llama-3.1-8b-instant';
+                    }
+                } else {
+                    lfmOption.style.display = '';
+                    lfmOption.disabled = false;
+                }
+            }
+        }
+
         document.getElementById('featureSelect').addEventListener('change', function () {
             const feature = this.value;
             const translationLabel = document.getElementById('translationLanguageLabel');
             const translationSelect = document.getElementById('translationLanguage');
             const toneLabel = document.getElementById('replyToneLabel');
             const toneSelect = document.getElementById('replyTone');
+
+            updateModelDropdownForFeature();
 
             // Show/hide translation language selector
             if (feature === 'translate') {
@@ -1340,6 +1361,9 @@
                 toneSelect.style.display = 'none';
             }
         });
+
+        // Apply model dropdown state on load (e.g. if Extract Tasks is selected by default)
+        updateModelDropdownForFeature();
 
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
@@ -1693,6 +1717,7 @@
             try {
                 // Use User 1 as the username for tasks (or could be configurable)
                 const username = user1Name;
+                const startTime = performance.now();
                 const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}&model=${encodeURIComponent(model)}`, {
                     method: 'POST',
                     headers: {
@@ -1700,6 +1725,7 @@
                     },
                 });
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
 
                 if (!response.ok) {
                     const detail = data && data.detail ? data.detail : 'Server returned an error';
@@ -1710,11 +1736,11 @@
                 loading.style.display = 'none';
 
                 if (tasks.length === 0) {
-                    results.innerHTML = '<p>No tasks found in the current conversation.</p>';
+                    results.innerHTML = `<p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p><p>No tasks found in the current conversation.</p>`;
                     return;
                 }
 
-                const tasksHtml = tasks.map((task, index) => {
+                const tasksHtml = `<p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p>` + tasks.map((task, index) => {
                     const title = task.title || '(untitled task)';
                     const desc = task.description || '';
                     const assignee = task.assignee || 'Unassigned';

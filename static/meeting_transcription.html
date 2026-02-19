@@ -312,6 +312,19 @@
         .error-text {
             color: #b91c1c;
         }
+
+        .transcript-line-block {
+            margin-bottom: 0.5em;
+        }
+        .transcript-ts {
+            font-variant-numeric: tabular-nums;
+            color: #6b7280;
+            font-size: 0.82em;
+            margin-right: 0.5em;
+        }
+        .transcript-line {
+            white-space: pre-wrap;
+        }
     </style>
 </head>
 
@@ -334,6 +347,7 @@
                         <label for="asrModelSelect" style="font-size: 0.9rem; font-weight: 600; color: #374151;">Transcription model</label>
                         <select id="asrModelSelect" style="width: 100%; max-width: 320px; margin-top: 6px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;">
                             <option value="whisper-large-v3">whisper-large-v3</option>
+                            <option value="openai/whisper-small">openai/whisper-small</option>
                             <option value="microsoft/VibeVoice-ASR">microsoft/VibeVoice-ASR</option>
                             <option value="facebook/seamless-m4t-medium">facebook/seamless-m4t-medium</option>
                         </select>
@@ -489,14 +503,18 @@
                 }
 
                 // Use raw transcription for downstream analysis, but display
-                // the speaker-formatted transcript when available.
+                // the speaker-formatted transcript when available (with timestamps for whisper-large-v3).
                 transcriptText = transcribeData.transcription || '';
                 const displayText =
                     transcribeData.formatted_transcription ||
                     transcribeData.transcription ||
                     'No text returned from transcription.';
 
-                transcriptBody.textContent = displayText;
+                if (displayText.match(/\[\d{2}:\d{2}:\d{2}\]/)) {
+                    transcriptBody.innerHTML = formatTranscriptWithTimestamps(displayText);
+                } else {
+                    transcriptBody.textContent = displayText;
+                }
                 transcriptBody.classList.remove('empty');
 
                 updateStatus('Transcription complete', 'You can now run meeting analysis.', 'done');
@@ -590,6 +608,22 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        /** Render transcript with [HH:MM:SS] timestamps and speakers; escapes content for safety. */
+        function formatTranscriptWithTimestamps(transcript) {
+            if (typeof transcript !== 'string') return '';
+            const tsRegex = /^(\[\d{2}:\d{2}:\d{2}\])(\s*)(.*)$/;
+            const lines = transcript.split(/\r?\n/);
+            const parts = lines.map(line => {
+                const m = line.match(tsRegex);
+                if (m) {
+                    return `<div class="transcript-line-block"><span class="transcript-ts">${escapeHtml(m[1])}</span><span class="transcript-line">${escapeHtml(m[2] + m[3])}</span></div>`;
+                }
+                if (line.trim() === '') return '<div class="transcript-line-block">&nbsp;</div>';
+                return `<div class="transcript-line-block"><span class="transcript-line">${escapeHtml(line)}</span></div>`;
+            });
+            return parts.join('');
         }
     </script>
 </body>

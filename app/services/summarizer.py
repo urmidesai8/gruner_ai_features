@@ -120,6 +120,92 @@ def _generate_with_deepseek_r1(user_content: str, system_content: Optional[str] 
     return tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
 
 
+# Local LiquidAI LFM2.5-1.2B-Instruct (load once, use from cache)
+LFM_MODEL_ID = "LiquidAI/LFM2.5-1.2B-Instruct"
+_lfm_tokenizer = None
+_lfm_model = None
+
+
+def _get_lfm_model():
+    """Lazy-load tokenizer and model for LFM2.5-1.2B-Instruct. Requires transformers>=5.0.0."""
+    global _lfm_tokenizer, _lfm_model
+    if _lfm_model is not None:
+        return _lfm_tokenizer, _lfm_model
+
+    from transformers import AutoTokenizer, AutoModelForCausalLM
+    import transformers
+    import torch
+
+    try:
+        _lfm_tokenizer = AutoTokenizer.from_pretrained(LFM_MODEL_ID, trust_remote_code=True)
+        _lfm_model = AutoModelForCausalLM.from_pretrained(LFM_MODEL_ID, trust_remote_code=True)
+    except Exception as e:
+        err_msg = str(e)
+        if "lfm2" in err_msg.lower() or "does not recognize this architecture" in err_msg.lower():
+            raise RuntimeError(
+                f"LFM2.5 ({LFM_MODEL_ID}) requires transformers>=5.0.0. "
+                f"Current version is {getattr(transformers, '__version__', 'unknown')}. "
+                "Upgrade with: pip install 'transformers>=5.0.0'. "
+                "Note: Phi-4 may not work with transformers 5.x."
+            ) from e
+        raise
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    _lfm_model = _lfm_model.to(device)
+    _lfm_model.eval()
+    return _lfm_tokenizer, _lfm_model
+
+
+def _generate_with_lfm(user_content: str, system_content: Optional[str] = None, max_new_tokens: int = 2000) -> str:
+    """Run inference with LFM2.5-1.2B-Instruct; returns decoded generated text only."""
+    import torch
+
+    tokenizer, model = _get_lfm_model()
+    if system_content:
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        messages = [{"role": "user", "content": user_content}]
+
+    try:
+        inputs = tokenizer.apply_chat_template(
+            messages,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            truncation=True,
+            max_length=4096,
+        )
+    except Exception:
+        inputs = tokenizer.apply_chat_template(
+            [{"role": "user", "content": (system_content or "") + "\n\n" + user_content}],
+            add_generation_prompt=True,
+            tokenize=True,
+            return_dict=True,
+            return_tensors="pt",
+            truncation=True,
+            max_length=4096,
+        )
+
+    device = next(model.parameters()).device
+    gen_kwargs = {"input_ids": inputs["input_ids"].to(device)}
+    if inputs.get("attention_mask") is not None:
+        gen_kwargs["attention_mask"] = inputs["attention_mask"].to(device)
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **gen_kwargs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+
+    input_length = gen_kwargs["input_ids"].shape[-1]
+    return tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
+
+
 def generate_chat_summary(messages: List[dict], username: Optional[str] = None, total_messages: int = 100, model: str = None) -> dict:
     """
     Generate a comprehensive chat summary using Groq Llama 3.1 8B instant model.
@@ -216,6 +302,34 @@ Return the JSON response now:"""
                 "return valid JSON only, no markdown code blocks, no additional text."
             )
             raw_response_text = _generate_with_deepseek_r1(prompt, system_content=system_content, max_new_tokens=2000)
+            response_text = _extract_json_from_response(raw_response_text)
+            llm_summary = json.loads(response_text)
+            result = {
+                "summary": llm_summary.get(
+                    "summary",
+                    f"Chat summary: {total_messages_count} messages from "
+                    f"{len(participants)} participant(s): {', '.join(participants)}",
+                ),
+                "bullet_points": llm_summary.get("bullet_points", []),
+                "key_decisions": llm_summary.get("key_decisions", []),
+                "action_items": llm_summary.get("action_items", []),
+                "unread_summary": llm_summary.get("unread_summary", "Summary generated successfully."),
+                "total_messages": total_messages_count,
+                "participants": list(participants),
+            }
+            if not result["key_decisions"]:
+                result["key_decisions"] = ["No explicit decisions identified in the conversation."]
+            if not result["action_items"]:
+                result["action_items"] = ["No action items identified in the conversation."]
+            return result
+
+        if model == LFM_MODEL_ID:
+            system_content = (
+                "You are a helpful assistant that analyzes chat conversations "
+                "and provides structured summaries in JSON format. Always "
+                "return valid JSON only, no markdown code blocks, no additional text."
+            )
+            raw_response_text = _generate_with_lfm(prompt, system_content=system_content, max_new_tokens=2000)
             response_text = _extract_json_from_response(raw_response_text)
             llm_summary = json.loads(response_text)
             result = {
@@ -402,6 +516,19 @@ Guidelines:
         if model == DEEPSEEK_R1_MODEL_ID:
             system_content = "You are a helpful assistant that analyzes text and provides structured JSON summaries."
             response_text = _generate_with_deepseek_r1(prompt, system_content=system_content, max_new_tokens=1500)
+            response_text = _extract_json_from_response(response_text)
+            llm_summary = json.loads(response_text)
+            return {
+                "summary": llm_summary.get("summary", "Summary generated."),
+                "bullet_points": llm_summary.get("bullet_points", []),
+                "key_decisions": llm_summary.get("key_decisions", []),
+                "action_items": llm_summary.get("action_items", []),
+                "unread_summary": "N/A for transcript",
+            }
+
+        if model == LFM_MODEL_ID:
+            system_content = "You are a helpful assistant that analyzes text and provides structured JSON summaries."
+            response_text = _generate_with_lfm(prompt, system_content=system_content, max_new_tokens=1500)
             response_text = _extract_json_from_response(response_text)
             llm_summary = json.loads(response_text)
             return {
