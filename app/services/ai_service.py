@@ -39,6 +39,7 @@ def transcribe_audio_seamless_m4t(audio_path: str, tgt_lang: str = "eng") -> str
     ASR transcription using SeamlessM4T (speech-to-text).
 
     Returns an error string (starting with "Error:") on failure.
+    Uses librosa for loading (avoids torchaudio/torchcodec/FFmpeg on Windows).
     """
     import os
     if not os.path.isfile(audio_path):
@@ -46,26 +47,27 @@ def transcribe_audio_seamless_m4t(audio_path: str, tgt_lang: str = "eng") -> str
 
     try:
         import torch  # type: ignore
-        import torchaudio  # type: ignore
+        import librosa  # type: ignore
     except ImportError as e:
-        return f"Error: install dependencies (e.g. pip install torchaudio). {e}"
+        return f"Error: install dependencies (e.g. pip install torch librosa). {e}"
 
     try:
         processor, model = _get_seamless_model_and_processor()
 
-        waveform, sample_rate = torchaudio.load(audio_path)
-        # convert to mono
-        if waveform.dim() == 2 and waveform.size(0) > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        # resample to 16kHz (commonly expected)
-        if sample_rate != 16000:
-            waveform = torchaudio.functional.resample(waveform, sample_rate, 16000)
-            sample_rate = 16000
-
-        audio = waveform.squeeze(0).cpu().numpy()
+        # Use librosa to avoid torchaudio/torchcodec/FFmpeg dependency on Windows
+        audio, sample_rate = librosa.load(audio_path, sr=16000, mono=True)
         inputs = processor(audios=audio, sampling_rate=sample_rate, return_tensors="pt")
-        if torch.cuda.is_available():
-            inputs = {k: v.cuda() if hasattr(v, "cuda") else v for k, v in inputs.items()}
+        # Match model device and dtype to avoid "Input type (float) and bias type (Half)" error
+        device = next(model.parameters()).device
+        dtype = next(model.parameters()).dtype
+        out = {}
+        for k, v in inputs.items():
+            if hasattr(v, "to"):
+                v = v.to(device=device)
+                if v.is_floating_point():
+                    v = v.to(dtype=dtype)
+            out[k] = v
+        inputs = out
 
         with torch.no_grad():
             generated_tokens = model.generate(**inputs, tgt_lang=tgt_lang, generate_speech=False)
@@ -159,6 +161,81 @@ def transcribe_audio_vibevoice(audio_path: str) -> str:
         return text or "Error: empty transcription from VibeVoice-ASR."
     except Exception as e:
         return f"Error transcription failed: {str(e)}"
+
+
+# -----------------------------------------------------------------------------
+# Whisper Large V3 (Hugging Face): lazy-loaded for meeting transcription.
+# Model is downloaded once and then loaded from cache (~/.cache/huggingface/hub).
+# -----------------------------------------------------------------------------
+_whisper_processor = None
+_whisper_model = None
+WHISPER_MODEL_ID = "openai/whisper-large-v3"
+
+
+def _get_whisper_model_and_processor():
+    """Load Whisper Large V3 model and processor once; reuse on subsequent calls."""
+    global _whisper_processor, _whisper_model
+    if _whisper_processor is not None and _whisper_model is not None:
+        return _whisper_processor, _whisper_model
+
+    from transformers import AutoProcessor, WhisperForConditionalGeneration  # type: ignore
+    import torch  # type: ignore
+
+    processor = AutoProcessor.from_pretrained(WHISPER_MODEL_ID)
+    model = WhisperForConditionalGeneration.from_pretrained(
+        WHISPER_MODEL_ID,
+        torch_dtype="auto",
+    )
+    if torch.cuda.is_available():
+        model = model.cuda()
+    model.eval()
+    _whisper_processor = processor
+    _whisper_model = model
+    return _whisper_processor, _whisper_model
+
+
+def transcribe_audio_whisper_local(audio_path: str, language: str = "en") -> str:
+    """
+    Transcribe an audio file using local Whisper Large V3 (Hugging Face).
+
+    Returns an error string (starting with "Error:") on failure.
+    Uses librosa for loading (avoids torchaudio/torchcodec/FFmpeg on Windows).
+    """
+    import os
+    if not os.path.isfile(audio_path):
+        return f"Error: file not found: {audio_path}"
+
+    try:
+        import torch  # type: ignore
+        import librosa  # type: ignore
+    except ImportError as e:
+        return f"Error: install dependencies (e.g. pip install torch librosa). {e}"
+
+    try:
+        processor, model = _get_whisper_model_and_processor()
+
+        # Use librosa to avoid torchaudio/torchcodec/FFmpeg dependency on Windows
+        audio, sample_rate = librosa.load(audio_path, sr=16000, mono=True)
+        inputs = processor(audio, sampling_rate=sample_rate, return_tensors="pt")
+        input_features = inputs.input_features
+        # Match model dtype (float16 on GPU, float32 on CPU) to avoid "Input type (float) and bias type (Half)" error
+        input_features = input_features.to(device=model.device, dtype=model.dtype)
+
+        gen_kwargs = {"task": "transcribe"}
+        if language and language != "auto":
+            gen_kwargs["language"] = language
+        with torch.no_grad():
+            generated_ids = model.generate(input_features, **gen_kwargs)
+
+        transcription = processor.batch_decode(
+            generated_ids,
+            skip_special_tokens=True,
+        )
+        text = (transcription[0] if transcription else "").strip()
+        return text or "Error: empty transcription from Whisper Large V3."
+    except Exception as e:
+        return f"Error transcription failed: {str(e)}"
+
 
 def call_groq_ai(prompt: str, model_name: str = None) -> str:
     if not groq_client:
