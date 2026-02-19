@@ -1029,7 +1029,7 @@
             ws2 = new WebSocket(`${protocol}//${host}/ws?username=${encodeURIComponent(user2Name)}`);
             ws2.onopen = () => updateStatus('status2', 'Connected (Online)', 'green');
             ws2.onclose = () => updateStatus('status2', 'Disconnected', 'red');
-            ws2.onmessage = (e) => handleMessage(e); // Both listen, but backend broadcasts to all
+            ws2.onmessage = (e) => handleMessage(e);
         }
 
         function updateStatus(elemId, text, color) {
@@ -1129,9 +1129,7 @@
             const text = input.value.trim();
             if (!text) return;
 
-            // Send via WS - Do NOT display locally, wait for WS echo/broadcast to other user
             ws1.send(JSON.stringify({ message: text }));
-
             input.value = '';
         }
 
@@ -1140,9 +1138,7 @@
             const text = input.value.trim();
             if (!text) return;
 
-            // Send via WS
             ws2.send(JSON.stringify({ message: text }));
-
             input.value = '';
         }
 

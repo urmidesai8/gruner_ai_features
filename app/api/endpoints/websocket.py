@@ -116,5 +116,3 @@ async def websocket_endpoint(websocket: WebSocket, username: str = "Anonymous") 
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{timestamp}] Error with user {username}: {e}")
         manager.disconnect(user_id)
-
-
