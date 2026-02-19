@@ -378,11 +378,15 @@ async def smart_replies(request: SmartRepliesRequest):
     
     tone_instruction = tone_instructions.get(tone, tone_instructions["auto"])
     
+    import time
+    start_time = time.time()
+
     # Check if local model requested (contains '/')
     if request.model and "/" in request.model and "openai" not in request.model:
         # Local execution using transformers
         suggestions = generate_smart_replies_local(filtered_messages, request.model)
-        return JSONResponse(content={"suggestions": suggestions})
+        duration = round(time.time() - start_time, 2)
+        return JSONResponse(content={"suggestions": suggestions, "execution_time": duration})
 
     # Fallback to Groq API (Original Logic)
     prompt = f"""
@@ -405,7 +409,13 @@ async def smart_replies(request: SmartRepliesRequest):
         response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0]
+            
         result = json.loads(response_text)
+        duration = round(time.time() - start_time, 2)
+        result["execution_time"] = duration
+        
     except Exception as e:
         print(f"Error in smart_replies: {e}")
         result = {"suggestions": []}

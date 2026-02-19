@@ -1589,20 +1589,21 @@
         }
 
         function showSmartReplies(data) {
-            // data format: { "suggestions": ["Yes", "No"] }
-            // Apply to the simulation of the LAST user who received a message?
-            // Usually Smart Replies are for the *current* user to reply to the *last* message.
-            // Let's assume User 1 wants to reply to User 2 (or vice versa).
-            // We'll show suggestions in the controls area or alert for now.
-            // Better: Show a temporary "Suggestions" box in the chat center.
-
+            // data format: { "suggestions": ["Yes", "No"], "execution_time": 0.5 }
             const suggestions = data.suggestions;
             if (!suggestions || suggestions.length === 0) return;
 
             const container = document.getElementById('messages');
             const div = document.createElement('div');
             div.className = 'suggestion-box';
-            div.innerHTML = `<strong>AI Suggestions:</strong><br/>`;
+
+            // Format time if available
+            let timeInfo = '';
+            if (data.execution_time) {
+                timeInfo = ` <span style="font-weight:normal; font-size:0.8em; color:#666;">(${data.execution_time}s)</span>`;
+            }
+
+            div.innerHTML = `<strong>AI Suggestions${timeInfo}:</strong><br/>`;
 
             suggestions.forEach(s => {
                 const btn = document.createElement('button');
