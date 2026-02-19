@@ -49,6 +49,7 @@ from ...services.local_feature_service import (
     analyze_moderation_local,
     analyze_reminders_local
 )
+from ...services.meeting_task_service import extract_meeting_tasks
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -69,6 +70,16 @@ class MeetingRecordingSummaryRequest(BaseModel):
 
     transcription: str
     model: Optional[str] = None
+
+
+class MeetingTasksRequest(BaseModel):
+    """
+    Request body for meeting task extraction.
+    
+    Extracts tasks from meeting transcriptions using spaCy NER + rule-based detection.
+    """
+    text: str
+    model: Optional[str] = None  # spaCy model name (e.g., "en_core_web_sm" or "en_core_web_trf")
 
 
 class MeetingAudioFileRequest(BaseModel):
@@ -817,4 +828,44 @@ async def meeting_recording_summary(
         raise HTTPException(
             status_code=500,
             detail=f"Meeting recording summary failed: {str(e)}",
+        ) from e
+
+
+@router.post("/meeting-tasks")
+async def meeting_tasks(
+    request: MeetingTasksRequest,
+) -> JSONResponse:
+    """
+    Extract tasks from a meeting transcription using spaCy NER + rule-based detection.
+
+    This endpoint uses spaCy to extract:
+    - PERSON entities (assignees)
+    - DATE/TIME entities (due dates)
+    - Task trigger verbs (send, deliver, prepare, etc.)
+
+    Returns tasks with structure:
+    {
+        "tasks": [
+            {
+                "task": "Send the proposal",
+                "assignee": "John",
+                "due_date": "Friday",
+                "confidence": 0.82
+            },
+            ...
+        ]
+    }
+    """
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="Transcription text is required.")
+
+    try:
+        # Use specified model or default to en_core_web_sm
+        spacy_model = request.model or "en_core_web_sm"
+        result = extract_meeting_tasks(request.text, model_name=spacy_model)
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting task extraction failed: {str(e)}",
         ) from e

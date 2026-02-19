@@ -372,6 +372,9 @@
                         <button class="btn btn-secondary" id="analyzeMeetingBtn" disabled>
                             ✨ Analyze meeting
                         </button>
+                        <button class="btn btn-secondary" id="extractTasksBtn" disabled>
+                            📋 Extract tasks
+                        </button>
                     </div>
 
                     <div class="status-row" id="statusRow">
@@ -399,13 +402,23 @@
                         <span class="pill" id="summaryLatencyPill">–</span>
                     </div>
                     <div class="section-body" id="summaryBody">
-                        <div class="muted">Run “Analyze meeting” after transcription to generate a structured summary,
+                        <div class="muted">Run "Analyze meeting" after transcription to generate a structured summary,
                             key points, and action items.</div>
                     </div>
                     <div class="tags">
                         <span class="tag">Highlights</span>
                         <span class="tag">Decisions</span>
                         <span class="tag">Action items</span>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <h3>Extracted tasks</h3>
+                        <span class="pill" id="tasksLatencyPill">–</span>
+                    </div>
+                    <div class="section-body" id="tasksBody">
+                        <div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>
                     </div>
                 </div>
             </div>
@@ -418,13 +431,16 @@
         const selectedFilename = document.getElementById('selectedFilename');
         const startTranscriptionBtn = document.getElementById('startTranscriptionBtn');
         const analyzeMeetingBtn = document.getElementById('analyzeMeetingBtn');
+        const extractTasksBtn = document.getElementById('extractTasksBtn');
         const statusDot = document.getElementById('statusDot');
         const statusPrimary = document.getElementById('statusPrimary');
         const statusSecondary = document.getElementById('statusSecondary');
         const transcriptBody = document.getElementById('transcriptBody');
         const summaryBody = document.getElementById('summaryBody');
+        const tasksBody = document.getElementById('tasksBody');
         const transcriptLatencyPill = document.getElementById('transcriptLatencyPill');
         const summaryLatencyPill = document.getElementById('summaryLatencyPill');
+        const tasksLatencyPill = document.getElementById('tasksLatencyPill');
 
         let uploadedFilename = null;
         let transcriptText = '';
@@ -446,10 +462,12 @@
             transcriptText = '';
             transcriptBody.textContent = 'Transcript will appear here after transcription finishes.';
             transcriptBody.classList.add('empty');
-            summaryBody.innerHTML = '<div class="muted">Run “Analyze meeting” after transcription to generate a structured summary, key points, and action items.</div>';
+            summaryBody.innerHTML = '<div class="muted">Run "Analyze meeting" after transcription to generate a structured summary, key points, and action items.</div>';
+            tasksBody.innerHTML = '<div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>';
             startTranscriptionBtn.disabled = false;
             analyzeMeetingBtn.disabled = true;
-            updateStatus('Ready to upload', 'Click “Start transcription” to upload and transcribe.', 'active');
+            extractTasksBtn.disabled = true;
+            updateStatus('Ready to upload', 'Click "Start transcription" to upload and transcribe.', 'active');
         });
 
         startTranscriptionBtn.addEventListener('click', async () => {
@@ -517,8 +535,9 @@
                 }
                 transcriptBody.classList.remove('empty');
 
-                updateStatus('Transcription complete', 'You can now run meeting analysis.', 'done');
+                updateStatus('Transcription complete', 'You can now run meeting analysis or extract tasks.', 'done');
                 analyzeMeetingBtn.disabled = !transcriptText;
+                extractTasksBtn.disabled = !transcriptText;
             } catch (error) {
                 console.error(error);
                 updateStatus('Error', error.message || 'Something went wrong during transcription.', 'error');
@@ -591,6 +610,71 @@
                 updateStatus('Error', 'Meeting analysis failed. You can retry.', 'error');
             } finally {
                 analyzeMeetingBtn.disabled = false;
+            }
+        });
+
+        extractTasksBtn.addEventListener('click', async () => {
+            if (!transcriptText) {
+                alert('No transcript available. Please transcribe the recording first.');
+                return;
+            }
+
+            extractTasksBtn.disabled = true;
+            updateStatus('Extracting tasks…', 'Using spaCy NER + rule-based detection to extract tasks.', 'active');
+            tasksBody.innerHTML = '<div class="muted">Extracting tasks…</div>';
+
+            try {
+                const t0 = performance.now();
+                const resp = await fetch('/api/features/meeting-tasks', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: transcriptText,
+                        model: null, // use default spaCy model (en_core_web_sm)
+                    }),
+                });
+
+                const data = await resp.json();
+                if (!resp.ok) {
+                    throw new Error(data.detail || 'Task extraction failed');
+                }
+
+                const t1 = performance.now();
+                const seconds = ((t1 - t0) / 1000).toFixed(1);
+                if (tasksLatencyPill) {
+                    tasksLatencyPill.textContent = `${seconds}s`;
+                }
+
+                const tasks = data.tasks || [];
+                if (tasks.length === 0) {
+                    tasksBody.innerHTML = '<div class="muted">No tasks found in the transcription. Tasks are detected based on action verbs, assignees (PERSON entities), and due dates (DATE entities).</div>';
+                    updateStatus('No tasks found', 'No tasks were detected in the transcription.', 'done');
+                } else {
+                    const html = `
+                        <div style="display: flex; flex-direction: column; gap: 12px;">
+                            ${tasks.map((task, idx) => `
+                                <div style="padding: 10px; background: #f9fafb; border-radius: 8px; border-left: 3px solid #3b82f6;">
+                                    <div style="font-weight: 600; color: #111827; margin-bottom: 6px;">
+                                        ${idx + 1}. ${escapeHtml(task.task || 'Untitled task')}
+                                    </div>
+                                    <div style="font-size: 0.85rem; color: #6b7280; display: flex; gap: 12px; flex-wrap: wrap;">
+                                        ${task.assignee ? `<span><strong>Assignee:</strong> ${escapeHtml(task.assignee)}</span>` : ''}
+                                        ${task.due_date ? `<span><strong>Due:</strong> ${escapeHtml(task.due_date)}</span>` : ''}
+                                        <span><strong>Confidence:</strong> ${(task.confidence * 100).toFixed(0)}%</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `;
+                    tasksBody.innerHTML = html;
+                    updateStatus('Tasks extracted', `Found ${tasks.length} task(s) with assignees and due dates.`, 'done');
+                }
+            } catch (error) {
+                console.error(error);
+                tasksBody.innerHTML = `<div class="error-text">Error extracting tasks: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+                updateStatus('Error', 'Task extraction failed. You can retry.', 'error');
+            } finally {
+                extractTasksBtn.disabled = false;
             }
         });
 

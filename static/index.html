@@ -1388,7 +1388,7 @@
             // Update Model Dropdown
             updateModelOptions();
 
-            updateModelDropdownForFeature();
+            // updateModelDropdownForFeature();
 
             // Show/hide translation language selector
             if (feature === 'translate') {
@@ -1410,7 +1410,7 @@
         });
 
         // Apply model dropdown state on load (e.g. if Extract Tasks is selected by default)
-        updateModelDropdownForFeature();
+        // updateModelDropdownForFeature();
 
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
