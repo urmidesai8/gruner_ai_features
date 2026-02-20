@@ -205,60 +205,100 @@ class MeetingTaskExtractor:
         return min(confidence, 1.0)
     
     def _extract_action_phrase(self, sent, verb_idx: int) -> str:
-        """Extract the action phrase (verb + object) from a sentence."""
+        """
+        Extract a complete, contextual action phrase from a sentence.
+        Includes verb, object, and relevant context to make the task clear.
+        """
         verb_token = sent[verb_idx]
-        action_parts = []
         
-        # Start from the verb and collect the verb phrase
-        # Include the verb itself
-        action_parts.append(verb_token.text)
+        # Strategy: Extract from verb to end of sentence, but intelligently
+        # Include verb + all its dependents + prepositional phrases
         
-        # Collect direct object and related noun phrases
-        collected_tokens = set([verb_token.i])
-        
-        # Find direct objects
+        # Find the verb's subtree (all tokens that depend on this verb)
+        verb_subtree = set([verb_token.i])
         for token in sent:
-            if token.head.i == verb_token.i and token.dep_ in ["dobj", "pobj", "attr", "nsubjpass"]:
-                # Collect the full noun phrase subtree
+            if token.head.i == verb_token.i:
                 for child in token.subtree:
-                    if child.i not in collected_tokens:
-                        # Include determiners, adjectives, and nouns
-                        if child.pos_ in ["DET", "ADJ", "NOUN", "PROPN", "ADP"]:
-                            action_parts.append(child.text)
-                            collected_tokens.add(child.i)
-                break
+                    verb_subtree.add(child.i)
         
-        # If no direct object, look for prepositional phrases with objects
-        if len(action_parts) == 1:
-            for token in sent:
-                if token.head.i == verb_token.i and token.dep_ == "prep":
-                    # Include preposition and its object
-                    action_parts.append(token.text)
-                    for child in token.children:
-                        if child.dep_ == "pobj":
-                            for subchild in child.subtree:
-                                if subchild.i not in collected_tokens and subchild.pos_ in ["DET", "ADJ", "NOUN", "PROPN"]:
-                                    action_parts.append(subchild.text)
-                                    collected_tokens.add(subchild.i)
+        # Collect tokens from verb onwards, but stop at:
+        # - Another main verb (different clause)
+        # - Sentence-ending punctuation
+        # - Too far from verb (max 15 words)
+        action_tokens = []
+        start_idx = verb_idx
+        max_tokens = 15  # Reasonable limit for task description
+        
+        # Find where the verb phrase ends
+        # Look for the next main verb or clause boundary
+        end_idx = len(sent)
+        for i in range(verb_idx + 1, len(sent)):
+            token = sent[i]
+            # Stop if we hit another main verb (different clause)
+            if token.pos_ == "VERB" and token.dep_ == "ROOT" and token.i != verb_token.i:
+                end_idx = i
+                break
+            # Stop at coordinating conjunctions that start new clauses
+            if token.text.lower() in ["and", "but", "or"] and i > verb_idx + 3:
+                # Check if this starts a new independent clause
+                if any(t.pos_ == "VERB" for t in sent[i+1:min(i+5, len(sent))]):
+                    end_idx = i
                     break
         
-        # If still no object, look for nearby nouns (but limit to 2-3 words)
-        if len(action_parts) <= 1:
-            for i in range(verb_idx, min(verb_idx + 4, len(sent))):
+        # Collect tokens from verb to end_idx - be more inclusive for context
+        collected = set()
+        for i in range(start_idx, min(end_idx, start_idx + max_tokens)):
+            token = sent[i]
+            
+            # Skip if it's a person/date entity (we'll add those separately)
+            if any(ent.start <= token.i < ent.end for ent in sent.ents 
+                   if ent.label_ in ["PERSON", "DATE", "TIME"]):
+                continue
+            
+            # Include the token if it's part of the verb phrase or relevant
+            # Be more inclusive - include most tokens after the verb for context
+            if (token.i in verb_subtree or 
+                token.head.i in verb_subtree or
+                token.dep_ in ["dobj", "pobj", "attr", "prep", "advmod", "amod", "nmod", "det", "ccomp", "xcomp"] or
+                i < start_idx + 12):  # Include tokens within 12 positions for context
+                
+                # Include articles and determiners for natural phrasing
+                if token.i not in collected:
+                    action_tokens.append(token)
+                    collected.add(token.i)
+        
+        # If we didn't get enough context (less than 5 words), include more following tokens
+        if len(action_tokens) < 5:
+            for i in range(start_idx, min(start_idx + 15, len(sent))):
                 token = sent[i]
-                if token.i not in collected_tokens and token.pos_ in ["NOUN", "PROPN"]:
-                    action_parts.append(token.text)
-                    collected_tokens.add(token.i)
-                    if len(action_parts) >= 3:  # Limit to verb + 2 words
-                        break
+                if token.i not in collected:
+                    # Skip entities but include other words for context
+                    if not any(ent.start <= token.i < ent.end for ent in sent.ents 
+                               if ent.label_ in ["PERSON", "DATE", "TIME"]):
+                        action_tokens.append(token)
+                        collected.add(token.i)
+                        if len(action_tokens) >= 10:  # Get at least 10 words for good context
+                            break
         
-        result = " ".join(action_parts).strip()
+        # Build the phrase from collected tokens
+        if not action_tokens:
+            # Fallback: just the verb
+            return verb_token.text
         
-        # Clean up: remove leading/trailing punctuation, normalize spaces
+        # Get text in order
+        phrase_parts = [t.text for t in action_tokens]
+        result = " ".join(phrase_parts)
+        
+        # Clean up: normalize spaces, remove extra punctuation
         result = re.sub(r'\s+', ' ', result)
-        result = re.sub(r'^[^\w]+|[^\w]+$', '', result)
+        # Remove leading/trailing punctuation but keep internal punctuation
+        result = re.sub(r'^[^\w\s]+|[^\w\s]+$', '', result)
         
-        return result
+        # Ensure we have at least the verb
+        if not result or len(result.split()) < 1:
+            result = verb_token.text
+        
+        return result.strip()
     
     def _find_task_verb(self, sent) -> Tuple[Optional[int], bool]:
         """
@@ -354,14 +394,48 @@ class MeetingTaskExtractor:
             # Extract action phrase
             action_phrase = self._extract_action_phrase(sent, verb_idx)
             
-            # Filter out very short or meaningless phrases
-            if not action_phrase or len(action_phrase.split()) < 2:
+            # Filter out very short or meaningless phrases (need at least 3 words for context)
+            if not action_phrase or len(action_phrase.split()) < 3:
                 continue
             
             # Filter out phrases that are just common non-task verbs
             first_word = action_phrase.split()[0].lower()
             if first_word in NON_TASK_VERBS:
                 continue
+            
+            # Filter out incomplete phrases that end with prepositions or articles
+            last_word = action_phrase.split()[-1].lower()
+            if last_word in ["the", "a", "an", "of", "to", "for", "in", "on", "at", "by", "with"]:
+                # Try to extend the phrase by including more tokens from the sentence
+                # Find all tokens from verb to end of sentence (or next clause)
+                extended_tokens = []
+                collected_ids = set()
+                
+                # Start from verb and collect up to 12 more tokens
+                for i in range(verb_idx, min(verb_idx + 15, len(sent))):
+                    token = sent[i]
+                    # Skip if it's a person/date entity (already captured separately)
+                    is_entity = any(ent.start <= token.i < ent.end for ent in sent.ents 
+                                   if ent.label_ in ["PERSON", "DATE", "TIME"])
+                    if not is_entity and token.i not in collected_ids:
+                        extended_tokens.append(token.text)
+                        collected_ids.add(token.i)
+                        # Stop if we hit sentence-ending punctuation or another main verb
+                        if token.text in [".", "!", "?", ";"]:
+                            break
+                        if i > verb_idx and token.pos_ == "VERB" and token.dep_ == "ROOT":
+                            break
+                
+                if len(extended_tokens) > len(action_phrase.split()):
+                    extended_phrase = " ".join(extended_tokens)
+                    # Clean up trailing incomplete words
+                    extended_phrase = re.sub(r'\s+(the|a|an|of|to|for|in|on|at|by|with)$', '', extended_phrase)
+                    if len(extended_phrase.split()) >= 3:
+                        action_phrase = extended_phrase
+                    else:
+                        continue  # Skip if we can't get a complete phrase
+                else:
+                    continue  # Skip incomplete phrases
             
             # Extract assignee (first valid person mentioned, or None)
             assignee = persons[0] if persons else None
