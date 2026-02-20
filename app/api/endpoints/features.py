@@ -50,6 +50,7 @@ from ...services.local_feature_service import (
     analyze_reminders_local
 )
 from ...services.meeting_task_service import extract_meeting_tasks
+from ...services.chat_search_service import search_chat_messages
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -80,6 +81,18 @@ class MeetingTasksRequest(BaseModel):
     """
     text: str
     model: Optional[str] = None  # spaCy model name (e.g., "en_core_web_sm" or "en_core_web_trf")
+
+
+class ChatSearchRequest(BaseModel):
+    """
+    Request body for semantic chat search.
+    
+    Searches through conversation history to find relevant messages.
+    """
+    query: str
+    limit: Optional[int] = 10
+    min_score: Optional[float] = 0.3
+    username: Optional[str] = None  # Filter by sender username
 
 
 class MeetingAudioFileRequest(BaseModel):
@@ -868,4 +881,62 @@ async def meeting_tasks(
         raise HTTPException(
             status_code=500,
             detail=f"Meeting task extraction failed: {str(e)}",
+        ) from e
+
+
+@router.post("/chat-search")
+async def chat_search(
+    request: ChatSearchRequest,
+) -> JSONResponse:
+    """
+    Perform semantic search over conversation history.
+    
+    This endpoint searches through all chat messages using semantic similarity
+    and keyword matching to find relevant conversations based on the user's query.
+    
+    Args:
+        query: Search query text
+        limit: Maximum number of results (default: 10)
+        min_score: Minimum similarity score threshold 0.0-1.0 (default: 0.3)
+        username: Optional username to filter messages by sender
+    
+    Returns:
+        {
+            "results": [
+                {
+                    "message_id": "...",
+                    "sender": "...",
+                    "message": "...",
+                    "timestamp": "...",
+                    "similarity_score": 0.85,
+                    "keyword_score": 0.9,
+                    "semantic_score": 0.7,
+                    "relevance": "high"
+                },
+                ...
+            ],
+            "total_found": 5,
+            "query": "..."
+        }
+    """
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="Search query is required.")
+    
+    try:
+        results = search_chat_messages(
+            query=request.query,
+            limit=request.limit or 10,
+            min_score=request.min_score or 0.3,
+            username=request.username,
+        )
+        
+        return JSONResponse(content={
+            "results": results,
+            "total_found": len(results),
+            "query": request.query,
+        })
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Chat search failed: {str(e)}",
         ) from e

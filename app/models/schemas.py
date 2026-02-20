@@ -2,6 +2,9 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict
 from fastapi import WebSocket
 import uuid
+import json
+import redis
+from app.core.config import settings
 
 class ChatMessage(BaseModel):
     """Model for chat message storage"""
@@ -78,15 +81,44 @@ class Reminder(BaseModel):
 
 
 class ChatHistory:
-    """Stores chat message history with unread tracking and AI state management."""
+    """Stores chat message history with unread tracking and AI state management using Redis."""
 
     def __init__(self) -> None:
-        self.messages: List[ChatMessage] = []
-        # username -> last message index read
-        self.user_last_read: Dict[str, int] = {}
-        # AI state tracking
-        self.ai_enabled: bool = True  # Default: AI is enabled
-        self.ai_toggle_history: List[Dict] = []  # Track when AI was toggled
+        # Redis connection
+        try:
+            self.redis_client = redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+                db=settings.REDIS_DB,
+                decode_responses=settings.REDIS_DECODE_RESPONSES,
+                socket_connect_timeout=5,
+                socket_timeout=5,
+            )
+            # Test connection
+            self.redis_client.ping()
+            print("Connected to Redis successfully")
+        except (redis.ConnectionError, redis.TimeoutError) as e:
+            print(f"Warning: Could not connect to Redis: {e}")
+            print("Falling back to in-memory storage")
+            self.redis_client = None
+            self.messages: List[ChatMessage] = []
+        
+        # Redis keys
+        self.MESSAGES_KEY = "chat:messages"
+        self.USER_LAST_READ_KEY = "chat:user_last_read"
+        self.AI_ENABLED_KEY = "chat:ai_enabled"
+        self.AI_TOGGLE_HISTORY_KEY = "chat:ai_toggle_history"
+        
+        # Initialize AI state in Redis if not exists
+        if self.redis_client:
+            if not self.redis_client.exists(self.AI_ENABLED_KEY):
+                self.redis_client.set(self.AI_ENABLED_KEY, "true")
+        else:
+            # Fallback to in-memory
+            self.user_last_read: Dict[str, int] = {}
+            self.ai_enabled: bool = True
+            self.ai_toggle_history: List[Dict] = []
 
     def add_message(self, sender: str, message: str, timestamp: str, ai_enabled: Optional[bool] = None) -> ChatMessage:
         """Add a new message to the history.
@@ -98,7 +130,7 @@ class ChatHistory:
             ai_enabled: Whether AI was enabled (defaults to current AI state)
         """
         if ai_enabled is None:
-            ai_enabled = self.ai_enabled
+            ai_enabled = self.get_ai_enabled()
         
         msg = ChatMessage(
             sender=sender,
@@ -107,51 +139,106 @@ class ChatHistory:
             message_id=str(uuid.uuid4()),
             ai_enabled=ai_enabled,
         )
-        self.messages.append(msg)
+        
+        if self.redis_client:
+            # Store in Redis as JSON in a list
+            msg_dict = msg.dict()
+            self.redis_client.rpush(self.MESSAGES_KEY, json.dumps(msg_dict))
+        else:
+            # Fallback to in-memory
+            self.messages.append(msg)
+        
         return msg
     
     def set_ai_enabled(self, enabled: bool) -> None:
         """Set the AI enabled state."""
         from datetime import datetime
-        self.ai_enabled = enabled
-        self.ai_toggle_history.append({
+        toggle_entry = {
             "enabled": enabled,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        }
+        
+        if self.redis_client:
+            self.redis_client.set(self.AI_ENABLED_KEY, str(enabled).lower())
+            self.redis_client.rpush(self.AI_TOGGLE_HISTORY_KEY, json.dumps(toggle_entry))
+        else:
+            # Fallback to in-memory
+            self.ai_enabled = enabled
+            self.ai_toggle_history.append(toggle_entry)
     
     def get_ai_enabled(self) -> bool:
         """Get the current AI enabled state."""
-        return self.ai_enabled
+        if self.redis_client:
+            value = self.redis_client.get(self.AI_ENABLED_KEY)
+            return value.lower() == "true" if value else True
+        else:
+            # Fallback to in-memory
+            return self.ai_enabled
+    
+    def _get_all_messages_from_redis(self) -> List[dict]:
+        """Internal method to get all messages from Redis or memory."""
+        if self.redis_client:
+            messages_json = self.redis_client.lrange(self.MESSAGES_KEY, 0, -1)
+            return [json.loads(msg) for msg in messages_json]
+        else:
+            # Fallback to in-memory
+            return [msg.dict() for msg in self.messages]
     
     def get_ai_enabled_messages(self) -> List[dict]:
         """Get only messages that were created when AI was enabled."""
-        return [msg.dict() for msg in self.messages if msg.ai_enabled]
+        all_messages = self._get_all_messages_from_redis()
+        return [msg for msg in all_messages if msg.get("ai_enabled", True)]
     
     def get_all_messages_for_summary(self) -> List[dict]:
         """Get all messages (for chat summary feature which always uses all messages)."""
-        return [msg.dict() for msg in self.messages]
+        return self._get_all_messages_from_redis()
 
     def get_all_messages(self) -> List[dict]:
         """Get all messages as dictionaries (for display purposes)."""
-        return [msg.dict() for msg in self.messages]
+        return self._get_all_messages_from_redis()
 
     def get_messages_since(self, since_index: int = 0) -> List[dict]:
         """Get messages since a specific index."""
-        return [msg.dict() for msg in self.messages[since_index:]]
+        all_messages = self._get_all_messages_from_redis()
+        return all_messages[since_index:]
 
     def get_unread_count(self, username: str) -> int:
         """Get count of unread messages for a user."""
-        last_read = self.user_last_read.get(username, 0)
-        return len(self.messages) - last_read
+        all_messages = self._get_all_messages_from_redis()
+        total_count = len(all_messages)
+        
+        if self.redis_client:
+            last_read_str = self.redis_client.hget(self.USER_LAST_READ_KEY, username)
+            last_read = int(last_read_str) if last_read_str else 0
+        else:
+            # Fallback to in-memory
+            last_read = self.user_last_read.get(username, 0)
+        
+        return total_count - last_read
 
     def mark_as_read(self, username: str) -> None:
         """Mark all messages as read for a user."""
-        self.user_last_read[username] = len(self.messages)
+        all_messages = self._get_all_messages_from_redis()
+        total_count = len(all_messages)
+        
+        if self.redis_client:
+            self.redis_client.hset(self.USER_LAST_READ_KEY, username, total_count)
+        else:
+            # Fallback to in-memory
+            self.user_last_read[username] = total_count
 
     def get_unread_messages(self, username: str) -> List[dict]:
         """Get unread messages for a user."""
-        last_read = self.user_last_read.get(username, 0)
-        return [msg.dict() for msg in self.messages[last_read:]]
+        all_messages = self._get_all_messages_from_redis()
+        
+        if self.redis_client:
+            last_read_str = self.redis_client.hget(self.USER_LAST_READ_KEY, username)
+            last_read = int(last_read_str) if last_read_str else 0
+        else:
+            # Fallback to in-memory
+            last_read = self.user_last_read.get(username, 0)
+        
+        return all_messages[last_read:]
 
 
 class ConnectionManager:
