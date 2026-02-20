@@ -240,6 +240,80 @@ async def search_group_memory(
     )
     return JSONResponse(content={"results": results})
 
+@router.post("/sentiment")
+async def analyze_sentiment(request: AIAnalysisRequest) -> JSONResponse:
+    """Analyze sentiment of messages using VADER (Valence Aware Dictionary and sEntiment Reasoner).
+
+    Returns per-message compound score in [-1.0, +1.0] and a label:
+      - Positive  (compound >= 0.05)
+      - Negative  (compound <= -0.05)
+      - Neutral   (otherwise)
+
+    VADER is rule-based and requires no GPU or model download.
+    """
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="AI features are currently disabled. Please enable AI to use this feature.",
+        )
+
+    if not request.messages:
+        return JSONResponse(content={})
+
+    try:
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="vaderSentiment is not installed. Run: pip install vaderSentiment",
+        )
+
+    import time, json as _json
+    analyzer = SentimentIntensityAnalyzer()
+    results: dict = {}
+    start_time = time.perf_counter()
+
+    for msg in request.messages:
+        text = msg.message or ""
+        scores = analyzer.polarity_scores(text)
+        compound = scores["compound"]
+
+        if compound >= 0.05:
+            label = "positive"
+        elif compound <= -0.05:
+            label = "negative"
+        else:
+            label = "neutral"
+
+        results[msg.id] = {
+            "label": label.capitalize(),
+            "compound": round(compound, 4),
+            "pos": round(scores["pos"], 4),
+            "neu": round(scores["neu"], 4),
+            "neg": round(scores["neg"], 4),
+        }
+
+        # --- Terminal Log ---
+        log_entry = {
+            "text": text,
+            "sentiment": {
+                "label": label,
+                "compound": round(compound, 4),
+                "positive": round(scores["pos"], 4),
+                "neutral": round(scores["neu"], 4),
+                "negative": round(scores["neg"], 4),
+            }
+        }
+        print("\n--- VADER Sentiment ---")
+        print(_json.dumps(log_entry, indent=2))
+        print("-----------------------")
+
+    elapsed = time.perf_counter() - start_time
+    print(f"\n✅ Sentiment analysis complete: {len(results)} message(s) in {elapsed:.4f}s\n")
+
+    return JSONResponse(content=results)
+
+
 @router.post("/prioritize")
 async def prioritize_messages(request: AIAnalysisRequest):
     """Classify priority for a list of messages.

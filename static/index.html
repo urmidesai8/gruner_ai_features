@@ -640,6 +640,7 @@
                     <option value="none">-- Select Feature --</option>
                     <option value="prioritize">Message Prioritization</option>
                     <option value="moderate">AI Moderation</option>
+                    <option value="sentiment">Sentiment Analysis</option>
                     <option value="smart_replies">Smart Replies</option>
                     <option value="summary">Chat Summary</option>
                     <option value="tasks">Extract Tasks</option>
@@ -647,7 +648,7 @@
                     <option value="translate">Language Translation</option>
                     <option value="transcribe">Audio Transcription</option>
                 </select>
-                <label for="analysisModelSelect"><strong>Model:</strong></label>
+                <label for="analysisModelSelect" id="analysisModelLabel"><strong>Model:</strong></label>
                 <select id="analysisModelSelect"
                     style="margin-right: 10px; padding: 5px; border-radius: 5px; border: 1px solid #ccc; font-size: 0.9em;">
                     <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
@@ -656,6 +657,9 @@
                     <option value="LiquidAI/LFM2.5-1.2B-Instruct" id="analysisModelOptionLfm">LiquidAI LFM2.5 1.2B
                         Instruct</option>
                 </select>
+                <span id="vaderBadge"
+                    style="display:none; background:#1565c0; color:#fff; padding:4px 10px; border-radius:5px; font-size:0.9em; margin-right:10px; font-weight:bold;">⚡
+                    VADER (Built-in)</span>
                 <label for="translationLanguage" id="translationLanguageLabel"
                     style="display: none;"><strong>Language:</strong></label>
                 <select id="translationLanguage" style="display: none;">
@@ -1386,11 +1390,23 @@
             const translationSelect = document.getElementById('translationLanguage');
             const toneLabel = document.getElementById('replyToneLabel');
             const toneSelect = document.getElementById('replyTone');
+            const modelLabel = document.getElementById('analysisModelLabel');
+            const modelSelect = document.getElementById('analysisModelSelect');
+            const vaderBadge = document.getElementById('vaderBadge');
 
             // Update Model Dropdown
             updateModelOptions();
 
-            // updateModelDropdownForFeature();
+            // Hide model dropdown for VADER (no LLM needed)
+            if (feature === 'sentiment') {
+                modelLabel.style.display = 'none';
+                modelSelect.style.display = 'none';
+                vaderBadge.style.display = 'inline';
+            } else {
+                modelLabel.style.display = 'inline';
+                modelSelect.style.display = 'inline';
+                vaderBadge.style.display = 'none';
+            }
 
             // Show/hide translation language selector
             if (feature === 'translate') {
@@ -1490,7 +1506,7 @@
                         tone: tone,
                         model: model
                     };
-                } else if (feature === 'prioritize' || feature === 'moderate') {
+                } else if (feature === 'prioritize' || feature === 'moderate' || feature === 'sentiment') {
                     // Wrap in AIAnalysisRequest structure
                     requestBody = {
                         messages: messagesPayload,
@@ -1525,6 +1541,8 @@
                     applyPriorities(result);
                 } else if (feature === 'moderate') {
                     applyModeration(result);
+                } else if (feature === 'sentiment') {
+                    applySentiment(result);
                 } else if (feature === 'smart_replies') {
                     showSmartReplies(result);
                 }
@@ -1561,6 +1579,49 @@
                 }
             });
             if (appliedCount === 0) alert("No priorities returned or IDs mismatch.");
+        }
+
+        function applySentiment(data) {
+            // data format: { "msg_id": { "label": "Positive", "compound": 0.8, ... } }
+            let appliedCount = 0;
+
+            // Remove previous sentiment tags before applying new ones
+            chatMessages.forEach(msg => {
+                const tagContainer = msg.element.querySelector('.ai-tags');
+                if (tagContainer) {
+                    tagContainer.querySelectorAll('.tag-sentiment').forEach(e => e.remove());
+                }
+            });
+
+            chatMessages.forEach(msg => {
+                const sentResult = data[msg.id];
+                if (sentResult) {
+                    const tagContainer = msg.element.querySelector('.ai-tags');
+                    if (!tagContainer) return;
+
+                    const label = sentResult.label || 'Neutral';
+                    const compound = sentResult.compound !== undefined ? sentResult.compound : 0;
+
+                    let tagColor = '#607d8b';   // Neutral - grey
+                    if (label === 'Positive') tagColor = '#388e3c';  // green
+                    if (label === 'Negative') tagColor = '#d32f2f';  // red
+
+                    const span = document.createElement('span');
+                    span.className = 'tag tag-sentiment';
+                    span.style.backgroundColor = tagColor;
+                    span.style.color = '#fff';
+                    span.style.borderRadius = '4px';
+                    span.style.padding = '2px 6px';
+                    span.style.fontSize = '0.78em';
+                    span.style.marginLeft = '4px';
+                    span.title = `VADER Score: ${compound} (pos:${sentResult.pos} neg:${sentResult.neg} neu:${sentResult.neu})`;
+                    span.textContent = `${label === 'Positive' ? '😊' : label === 'Negative' ? '😞' : '😐'} ${label}`;
+                    tagContainer.appendChild(span);
+                    appliedCount++;
+                }
+            });
+
+            if (appliedCount === 0) alert('No sentiment results returned or IDs mismatch.');
         }
 
         function applyModeration(data) {
