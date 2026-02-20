@@ -291,3 +291,128 @@ def analyze_reminders_local(messages: list, model_id: str) -> dict:
             print(f"NER failed: {e}")
 
     return {"suggestions": suggestions}
+# -----------------------------------------------------------------------------
+# Vector Store / Embedding Logic
+# -----------------------------------------------------------------------------
+_embedding_model = None
+_reply_bank_embeddings = None
+_reply_bank_texts = [
+    "I'll look into it and get back to you.",
+    "Can we discuss this in a quick call?",
+    "Thanks for the update.",
+    "Could you clarify the deadline?",
+    "I'll take care of it right away.",
+    "Sounds good to me.",
+    "Please send over the details.",
+    "I'm working on it now.",
+    "Let's catch up later.",
+    "Got it, thanks!",
+]
+
+def _get_embedding_model_and_bank(model_id: str):
+    """
+    Lazy load SentenceTransformer model and pre-compute bank embeddings.
+    """
+    global _embedding_model, _reply_bank_embeddings
+    
+    if _embedding_model is not None:
+        return _embedding_model, _reply_bank_embeddings
+
+    print(f"Loading embedding model: {model_id}...")
+    from sentence_transformers import SentenceTransformer
+    
+    cache_dir = getattr(settings, "MODEL_CACHE_DIR", None)
+    
+    # Load model (all-MiniLM-L6-v2 is small & fast)
+    model = SentenceTransformer(model_id, cache_folder=cache_dir)
+    _embedding_model = model
+    
+    # Compute embeddings for the bank once
+    print("Computing initial reply bank embeddings...")
+    _reply_bank_embeddings = model.encode(_reply_bank_texts, convert_to_tensor=True)
+    
+    return _embedding_model, _reply_bank_embeddings
+
+
+# Import the centralized CacheService
+from app.services.cache_service import cache_service
+
+def learn_new_reply(user_msg: str, bot_reply: str, model_id: str):
+    """
+    Dynamic Learning: Cache (UserMsg -> BotReply) in FAISS via CacheService.
+    """
+    print(f"Learning new reply via FAISS: '{bot_reply}' for query '{user_msg}'")
+    # Store in FAISS (and Memcached if enabled)
+    cache_service.cache_response(user_msg, bot_reply)
+
+
+def generate_smart_replies_embedding(messages: list, model_id: str = "sentence-transformers/all-MiniLM-L6-v2") -> dict:
+    """
+    Generate replies using FAISS (CacheService).
+    Fallback to Generative LLM if similarity is low, then Learn.
+    """
+    if not messages:
+        return {"suggestions": [], "source": "none"}
+
+    last_msg = messages[-1].message
+    
+    # 1. Search FAISS via CacheService
+    import time
+    start_time = time.perf_counter()
+    
+    # Threshold 0.51 as requested by user previously
+    matches = cache_service.get_semantic_matches(last_msg, top_k=5, threshold=0.51)
+    
+    duration = time.perf_counter() - start_time
+    
+    # 2. Prepare Detailed Log
+    import json
+    log_data = {
+        "replies": [],
+        "confidence_level": "low",
+        "response_time": f"{duration:.4f}s"
+    }
+
+    CONFIDENCE_THRESHOLD = 0.51
+    HIGH_CONFIDENCE = 0.8
+    
+    # matches is list of {"text": "...", "score": float}
+    for match in matches:
+        log_data["replies"].append({
+            "text": match["text"],
+            "score": match["score"]
+        })
+
+    top_score = matches[0]["score"] if matches else 0.0
+    
+    if top_score > HIGH_CONFIDENCE:
+        log_data["confidence_level"] = "high"
+    elif top_score > CONFIDENCE_THRESHOLD:
+        log_data["confidence_level"] = "medium"
+    else:
+        log_data["confidence_level"] = "low"
+
+    # Print to Backend Logs (Terminal)
+    print("\n--- Smart Reply Analysis (FAISS) ---")
+    print(json.dumps(log_data, indent=2))
+    print("------------------------------------\n")
+
+    # 3. Return Logic (Top 3)
+    if top_score > CONFIDENCE_THRESHOLD:
+        suggestions = [m["text"] for m in matches[:3]]
+        return {
+            "suggestions": suggestions,
+            "source": "faiss-cache",
+            "confidence": f"{top_score:.2f}",
+            "response_time": f"{duration:.4f}s"
+        }
+        
+    # 4. Low Confidence -> Fallback to Generative (and Learn)
+    print(f"Low/No similarity ({top_score:.2f}). Falling back to LLM...")
+    
+    return {
+        "suggestions": [],
+        "source": "fallback-llm", # Signal to caller to use LLM
+        "confidence": f"{top_score:.2f}",
+        "response_time": f"{duration:.4f}s"
+    }

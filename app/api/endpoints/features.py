@@ -22,6 +22,8 @@ from ...models.schemas import (
 from ...services.ai_service import (
     call_groq_ai,
     transcribe_audio,
+    transcribe_audio_with_timestamps,
+    transcribe_audio_whisper_local,
     transcribe_audio_vibevoice,
     transcribe_audio_seamless_m4t,
     transcribe_audio_whisper_local,
@@ -45,7 +47,9 @@ from ...services.local_feature_service import (
     generate_smart_replies_local,
     analyze_prioritization_local,
     analyze_moderation_local,
-    analyze_reminders_local
+    analyze_reminders_local,
+    generate_smart_replies_embedding,
+    learn_new_reply,
 )
 
 class TextSummaryRequest(BaseModel):
@@ -380,32 +384,67 @@ async def smart_replies(request: SmartRepliesRequest):
     
     import time
     start_time = time.time()
+    should_learn = False
+    original_model = request.model 
 
-    # Check if local model requested (contains '/')
+    # --- 1. Embedding / Vector Search (New Feature) ---
+    if request.model and "sentence-transformers" in request.model:
+        # Try retrieving from bank
+        vector_result = generate_smart_replies_embedding(filtered_messages, request.model)
+        
+        if vector_result.get("source") in ["vector-bank", "faiss-cache"]:
+            # Found in cache! Return immediately.
+            duration = round(time.time() - start_time, 2)
+            vector_result["execution_time"] = duration
+            # Pass through the internal model time if available
+            if "response_time" in vector_result:
+                 vector_result["model_time"] = vector_result["response_time"]
+            return JSONResponse(content=vector_result)
+            
+        # Missed in cache (Low confidence). Fallback to Generative AI.
+        # We flag this to "Learn" the new result later.
+        should_learn = True
+        
+        # Force fallback to Groq (or default cloud) by clearing the model ID 
+        # so it skips the "Local execution" block below which expects a generative model.
+        request.model = None 
+
+    # --- 2. Local Generative Execution ---
+    # Check if local model requested (contains '/') AND it's not the embedding model we just handled
     if request.model and "/" in request.model and "openai" not in request.model:
         # Local execution using transformers
         suggestions = generate_smart_replies_local(filtered_messages, request.model)
         duration = round(time.time() - start_time, 2)
         return JSONResponse(content={"suggestions": suggestions, "execution_time": duration})
 
-    # Fallback to Groq API (Original Logic)
+    # --- 3. Cloud/Groq Fallback (Original Logic) ---
+    # --- 3. Cloud/Groq Fallback (Original Logic) ---
+    # Smart "Context-Aware" Prompt
+    recent_msgs = filtered_messages[-3:] # Get last 3 messages for context
+    conversation_context = "\n".join([f"- {m.message}" for m in recent_msgs])
+    
     prompt = f"""
-    Generate 3 short, context-aware reply suggestions for the following message:
-    "{last_msg.message}"
+    You are a helpful AI assistant drafting quick replies for a chat user.
+    
+    Conversation Context (Last few messages):
+    {conversation_context}
+    
+    Task: Generate 3 short, natural reply suggestions for the LAST message above.
     
     Tone requirement: {tone_instruction}
     
-    The replies should:
-    - Be contextually appropriate
-    - Match the specified tone: {tone}
-    - Be concise (1-2 sentences each)
-    - Be natural and conversational
+    Strict Rules:
+    - Do NOT paraphrase the last message.
+    - Do NOT continue the conversation as if you are the same speaker.
+    - You are replying TO the last message.
+    - Keep it under 15 words.
     
     Return a JSON object: {{ "suggestions": ["Reply 1", "Reply 2", "Reply 3"] }}
     Return ONLY valid JSON.
     """
     
     try:
+        # Use default Groq model (llama3-70b usually) if request.model is None
         response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
@@ -413,6 +452,19 @@ async def smart_replies(request: SmartRepliesRequest):
             response_text = response_text.split("```")[1].split("```")[0]
             
         result = json.loads(response_text)
+        
+        # --- 4. Dynamic Learning (Post-Generation) ---
+        if should_learn and result.get("suggestions"):
+            # We generated new answers. Store them in the bank for next time.
+            embedding_model_id = original_model
+            for reply in result["suggestions"]:
+                # Learn the pair: (User Query) -> (Bot Reply)
+                # Note: We learn from the LAST message the user sent.
+                learn_new_reply(last_msg.message, reply, embedding_model_id)
+            
+            # Mark source as "generated-and-learned" for UI clarity if needed
+            result["source"] = "generative-llm (learned)"
+
         duration = round(time.time() - start_time, 2)
         result["execution_time"] = duration
         
@@ -716,26 +768,31 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
+            segments = []
         elif asr_model == "microsoft/VibeVoice-ASR":
             raw_transcription = await run_in_threadpool(transcribe_audio_vibevoice, str(file_path))
             if raw_transcription.startswith("Error"):
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
-        elif asr_model in ("openai/whisper-large-v3", "whisper-large-v3"):
-            # Local Whisper Large V3 (Hugging Face); no fallback — surface errors for testing
-            raw_transcription = await run_in_threadpool(transcribe_audio_whisper_local, str(file_path))
+            segments = []
+        elif asr_model in ("whisper-large-v3", "openai/whisper-small"):
+            # Local Whisper (Transformers): load once per model, then from cache
+            raw_transcription, segments = await run_in_threadpool(
+                transcribe_audio_whisper_local, str(file_path), "en"
+            )
         else:
-            # default: Groq Whisper API
+            # Fallback: Groq Whisper
             with open(file_path, "rb") as audio_file:
-                raw_transcription = transcribe_audio((request.filename, audio_file))
+                raw_transcription, segments = transcribe_audio_with_timestamps((request.filename, audio_file))
 
         if isinstance(raw_transcription, str) and raw_transcription.startswith("Error"):
             raise HTTPException(status_code=500, detail=raw_transcription)
 
-        # 2) Meeting-style formatted transcription (speaker separated)
+        # 2) Meeting-style formatted transcription (speaker separated; with timestamps for whisper-large-v3)
         formatted_transcription = format_meeting_transcription(
             raw_transcription,
             model_name=request.model,
+            segments=segments if segments else None,
         )
 
         if isinstance(formatted_transcription, str) and formatted_transcription.startswith("Error"):
@@ -744,6 +801,7 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
                 content={
                     "transcription": raw_transcription,
                     "formatted_transcription": None,
+                    "segments": segments if segments else None,
                     "notice": "Meeting formatting failed; returning raw transcription only.",
                 }
             )
@@ -752,6 +810,7 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
             content={
                 "transcription": raw_transcription,
                 "formatted_transcription": formatted_transcription,
+                "segments": segments if segments else None,
             }
         )
     except HTTPException:

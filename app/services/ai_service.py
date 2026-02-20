@@ -194,7 +194,7 @@ def _get_whisper_model_and_processor():
     return _whisper_processor, _whisper_model
 
 
-def transcribe_audio_whisper_local(audio_path: str, language: str = "en") -> str:
+def transcribe_audio_whisper_local(audio_path: str, language: str = "en") -> tuple[str, list | None]:
     """
     Transcribe an audio file using local Whisper Large V3 (Hugging Face).
 
@@ -232,9 +232,11 @@ def transcribe_audio_whisper_local(audio_path: str, language: str = "en") -> str
             skip_special_tokens=True,
         )
         text = (transcription[0] if transcription else "").strip()
-        return text or "Error: empty transcription from Whisper Large V3."
+        # Return tuple to match expected signature (text, segments)
+        # Segments are not easily available with raw model.generate without pipeline, so returning None for now.
+        return (text or "Error: empty transcription from Whisper Large V3."), None
     except Exception as e:
-        return f"Error transcription failed: {str(e)}"
+        return f"Error transcription failed: {str(e)}", None
 
 
 def call_groq_ai(prompt: str, model_name: str = None) -> str:
@@ -275,7 +277,31 @@ def transcribe_audio(file_buffer) -> str:
         return f"Error transcription failed: {str(e)}"
 
 
-def format_meeting_transcription(transcript: str, model_name: str | None = None) -> str:
+def transcribe_audio_with_timestamps(file_buffer) -> tuple[str, list]:
+    """
+    Transcribe audio using Groq Whisper and return text + segments with timestamps.
+    """
+    if not groq_client:
+        return "Error: missing dependency 'groq'.", []
+    if not groq_client.api_key:
+        return "Error: GROQ_API_KEY not set.", []
+
+    try:
+        # We use verbose_json to get segments/timestamps
+        transcription = groq_client.audio.transcriptions.create(
+            file=file_buffer,
+            model="whisper-large-v3",
+            response_format="verbose_json",
+            language="en",
+            temperature=0.0
+        )
+        # transcription is an object with .text and .segments (list of dicts/objects)
+        return transcription.text, transcription.segments
+    except Exception as e:
+        return f"Error transcription failed: {str(e)}", []
+
+
+def format_meeting_transcription(transcript: str, model_name: str | None = None, segments: list | None = None) -> str:
     """
     Format a raw transcription into a meeting-style transcript with speakers.
 
