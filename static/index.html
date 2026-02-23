@@ -207,6 +207,11 @@
             color: white;
         }
 
+        .tag-low {
+            background: #4caf50;
+            color: white;
+        }
+
         .tag-safe {
             background: #4caf50;
             color: white;
@@ -853,10 +858,11 @@
                 { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
             ],
             'prioritize': [
-                { value: 'sentence-transformers/all-mpnet-base-v2', text: 'MPNet Base V2 (Embeddings) - Default' },
-                { value: 'distilbert-base-uncased-finetuned-sst-2-english', text: 'DistilBERT SST-2 (Sentiment)' },
-                { value: 'cross-encoder/ms-marco-bert-base-dot-prod', text: 'MS MARCO BERT (Ranking)' },
-                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+                { value: 'typeform/distilbert-base-uncased-mnli', text: 'DistilBERT MNLI (Zero-Shot, Fast)' },
+                { value: 'facebook/bart-large-mnli', text: 'BART Large MNLI (Zero-Shot NLI, Accurate)' },
+                { value: 'cross-encoder/nli-deberta-v3-small', text: 'DeBERTa NLI Small (Zero-Shot, Balanced)' },
+                { value: 'distilbert-base-uncased-finetuned-sst-2-english', text: 'DistilBERT SST-2 (Sentiment Heuristic)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud API)' }
             ],
             'moderate': [
                 { value: 'facebook/roberta-base-openai-detector', text: 'RoBERTa OpenAI Detector (FaceBook) - Default' },
@@ -1569,6 +1575,7 @@
                     let className = 'tag-normal';
                     if (priority.toLowerCase() === 'urgent') className = 'tag-urgent';
                     if (priority.toLowerCase() === 'high') className = 'tag-high';
+                    if (priority.toLowerCase() === 'low') className = 'tag-low';
 
                     // Always show the tag for clarity now
                     const span = document.createElement('span');

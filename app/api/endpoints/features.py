@@ -332,12 +332,19 @@ async def prioritize_messages(request: AIAnalysisRequest):
     ai_enabled_ids = {msg['message_id'] for msg in ai_enabled_messages}
     filtered_messages = [m for m in request.messages if m.id in ai_enabled_ids]
     
+    print(f"\n[PRIORITY DEBUG] Total messages in request: {len(request.messages)}")
+    print(f"[PRIORITY DEBUG] AI-enabled message IDs in store: {ai_enabled_ids}")
+    print(f"[PRIORITY DEBUG] Filtered messages count: {len(filtered_messages)}")
+    print(f"[PRIORITY DEBUG] Selected model: {request.model}")
+    
     if not filtered_messages:
+        print("[PRIORITY DEBUG] No filtered messages – returning empty {}")
         return {}
     
     # Check if local model requested (contains '/')
     if request.model and "/" in request.model and "openai" not in request.model:
         # Local execution using transformers
+        print(f"[PRIORITY DEBUG] Routing to LOCAL model: {request.model}")
         results = analyze_prioritization_local(filtered_messages, request.model)
         return JSONResponse(content=results)
 
@@ -347,22 +354,46 @@ async def prioritize_messages(request: AIAnalysisRequest):
     prompt_text = "\n".join(prompt_items)
     
     prompt = f"""
-    Analyze the priority of the following messages. 
-    Return a JSON object where keys are IDs and values are one of: 'Low', 'Normal', 'High', 'Urgent'.
-    
+    Analyze the priority of the following messages.
+    Return a JSON object where keys are message IDs and values are exactly one of: 'Urgent', 'High', 'Normal', 'Low'.
+    Determine priority based on urgency, complaints, or critical issues.
+
     Messages:
     {prompt_text}
-    
+
     Return ONLY valid JSON.
     """
+    
+    import time
+    start_time = time.perf_counter()
     
     try:
         response_text = call_groq_ai(prompt, model_name=request.model)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
-    except Exception:
-        results = {m.id: "Normal" for m in filtered_messages}
+        
+        # --- Terminal Log for API Model ---
+        for msg in filtered_messages:
+            val = results.get(msg.id, "Low")
+            log_entry = {
+                "text": msg.message,
+                "prioritization": {
+                    "model": request.model,
+                    "label": val,
+                    "source": "api"
+                }
+            }
+            print("\n--- Message Prioritization (API Model) ---")
+            print(json.dumps(log_entry, indent=2))
+            print("------------------------------------------")
+            
+    except Exception as e:
+        print(f"API Prioritization failed: {e}")
+        results = {m.id: "Low" for m in filtered_messages}
+        
+    elapsed = time.perf_counter() - start_time
+    print(f"\n✅ API Prioritization complete: {len(results)} message(s) in {elapsed:.4f}s\n")
         
     return JSONResponse(content=results)
 

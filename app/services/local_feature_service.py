@@ -94,6 +94,14 @@ def _get_pipeline(task: str, model_id: str):
                 device=device, 
                 model_kwargs=model_kwargs
             )
+        elif task == "zero-shot-classification":
+            # For Prioritization using NLI models (e.g. facebook/bart-large-mnli)
+            pipe = pipeline(
+                task,
+                model=model_id,
+                device=device,
+                model_kwargs=model_kwargs
+            )
         else:
             raise ValueError(f"Unsupported task: {task}")
 
@@ -155,60 +163,139 @@ def generate_smart_replies_local(messages: list, model_id: str) -> list:
 
 def analyze_prioritization_local(messages: list, model_id: str) -> dict:
     """
-    Analyze priority using a local classification or embedding model.
+    Classify message priority using Zero-Shot Classification (NLI-based).
+    
+    Uses an NLI model like facebook/bart-large-mnli that can classify text
+    directly into custom labels: 'Urgent', 'High', 'Normal', 'Low'.
+    This approach is far more accurate than heuristic sentiment mapping.
     """
+    import time, json as _json
     results = {}
-    pipe = None
+    start_time = time.perf_counter()
 
-    # Determine task based on model type
-    if "mpnet" in model_id or "sentence-transformers" in model_id:
-         # For embeddings, we might need a custom approach, but for simplicity
-         # let's assume valid classifiers for now or use zero-shot if supported.
-         # Actually, all-mpnet-base-v2 is for embeddings. 
-         # A better prioritization approach with generic models is Zero-Shot Classification.
-         # Let's override task to zero-shot if we want to rank arbitrary labels.
-         pass 
+    PRIORITY_LABELS = ["Urgent", "High", "Normal", "Low"]
 
-    # Fallback to text-classification for models fine-tuned on sentiment/urgency
-    # Or use zero-shot-classification for generic priority labeling
-    
-    # NOTE: user suggested `distilbert-base-uncased-finetuned-sst-2-english` which is sentiment.
-    # High negative sentiment != High Priority, but for POC we can map it or use Zero-Shot.
-    
-    # We will use Zero-Shot for flexibility with models like 'facebook/bart-large-mnli' 
-    # if the user selects a compatible model, OR specific headers.
-    
-    # For the recommended 'sentence-transformers/all-mpnet-base-v2', it's an encoding model.
-    # It doesn't output "High/Low" directly. 
-    # To keep it simple for this POC:
-    # 1. If it's a classifier (like distilbert-sst-2), map Negative -> High (Urgent), Positive -> Low.
-    # 2. If it's an embedding model, this is harder without a reference.
-    
-    # Recommendation: Use a Zero-Shot intent for actual "Priority" labeling if possible.
-    # But sticking to User's list:
-    
-    if "sst-2" in model_id:
-        # Sentiment analysis: Negative -> Urgent, Positive -> Normal
-        pipe = _get_pipeline("text-classification", model_id)
-        if not pipe: return {}
-        
+    # MPNet is an embedding model - cannot classify, skip gracefully
+    if "mpnet" in model_id.lower() or "sentence-transformers" in model_id.lower():
+        print("[PRIORITY] MPNet is an embedding model, cannot classify directly. Use an NLI model.")
+        for msg in messages:
+            results[msg.id] = "Low"
+        return results
+
+    # -------------------------------------------------------------------------
+    # 2. NLI / Zero-Shot models (bart-large-mnli, deberta-nli, typeform, etc.)
+    # -------------------------------------------------------------------------
+    if any(x in model_id.lower() for x in ["mnli", "nli", "bart-large-mnli", "deberta", "typeform"]):
+        pipe = _get_pipeline("zero-shot-classification", model_id)
+        if not pipe:
+            return {m.id: "Low" for m in messages}
+
         for msg in messages:
             try:
-                out = pipe(msg.message, truncation=True, max_length=512)
-                label = out[0]['label'] # POSITIVE / NEGATIVE
-                # Map Negative -> High Priority (Complaint/Issue), Positive -> Low
-                priority = "High" if label == "NEGATIVE" else "Normal"
-                results[msg.id] = priority
-            except:
-                results[msg.id] = "Normal"
-                
-    else:
-        # Default fallback or placeholder for embedding-based ranking
-        # For now, return "Normal" if we can't classify
-        for msg in messages:
-             results[msg.id] = "Normal"
+                out = pipe(msg.message, candidate_labels=PRIORITY_LABELS)
+                print(f"\n[DEBUG] Zero-Shot output for '{msg.message}': {out}")
 
+                # Out format: {"labels": ["Urgent", "High", ...], "scores": [0.8, 0.1, ...]}
+                top_label = out["labels"][0]
+                top_score = out["scores"][0]
+
+                results[msg.id] = top_label
+
+                log_entry = {
+                    "text": msg.message,
+                    "prioritization": {
+                        "model": model_id,
+                        "label": top_label,
+                        "confidence": round(top_score, 4),
+                        "all_scores": {l: round(s, 4) for l, s in zip(out["labels"], out["scores"])},
+                        "source": "local-zero-shot"
+                    }
+                }
+                print("\n--- Message Prioritization (Zero-Shot) ---")
+                print(_json.dumps(log_entry, indent=2))
+                print("-" * 42)
+
+            except Exception as e:
+                import traceback
+                print(f"[PRIORITY ERROR] msg {msg.id}: {e}")
+                traceback.print_exc()
+                results[msg.id] = "Low"
+
+        elapsed = time.perf_counter() - start_time
+        print(f"\n✅ Zero-Shot Prioritization: {len(results)} message(s) in {elapsed:.4f}s\n")
+        return results
+
+    # For SST-2 / sentiment-based models, use improved heuristic mapping
+    # The SST-2 model outputs NEGATIVE/POSITIVE with fine-grained scores
+    pipe = _get_pipeline("text-classification", model_id)
+    if not pipe:
+        return {m.id: "Low" for m in messages}
+
+    for msg in messages:
+        try:
+            out = pipe(msg.message, truncation=True, max_length=512, top_k=None)
+            print(f"\n[DEBUG] SST-2 pipeline output for '{msg.message}': {out}")
+
+            # Flatten to list of dicts
+            def flatten_scores(item):
+                if isinstance(item, dict) and 'label' in item and 'score' in item:
+                    return [item]
+                elif isinstance(item, list):
+                    res = []
+                    for i in item:
+                        res.extend(flatten_scores(i))
+                    return res
+                return []
+
+            scores = flatten_scores(out)
+
+            neg_score = next((x['score'] for x in scores if x['label'].upper() == 'NEGATIVE'), 0.0)
+            pos_score = next((x['score'] for x in scores if x['label'].upper() == 'POSITIVE'), 0.0)
+
+            # If we couldn't find standard labels by name, try by position
+            if neg_score == 0.0 and pos_score == 0.0 and len(scores) >= 2:
+                # SST-2: LABEL_0=Negative, LABEL_1=Positive
+                by_label = {x['label'].upper(): x['score'] for x in scores}
+                neg_score = by_label.get('LABEL_0', by_label.get('NEGATIVE', 0.0))
+                pos_score = by_label.get('LABEL_1', by_label.get('POSITIVE', 0.0))
+
+            print(f"[DEBUG] neg_score={neg_score}, pos_score={pos_score}")
+
+            if neg_score > 0.85:
+                priority = "Urgent"
+            elif neg_score > 0.60:
+                priority = "High"
+            elif neg_score > 0.40:
+                priority = "Normal"
+            else:
+                priority = "Low"
+
+            results[msg.id] = priority
+
+            log_entry = {
+                "text": msg.message,
+                "prioritization": {
+                    "model": model_id,
+                    "label": priority,
+                    "metrics": {"negative_score": round(neg_score, 4), "positive_score": round(pos_score, 4)},
+                    "source": "local-sentiment"
+                }
+            }
+            print("\n--- Message Prioritization (Sentiment Heuristic) ---")
+            print(_json.dumps(log_entry, indent=2))
+            print("-" * 50)
+
+        except Exception as e:
+            import traceback
+            print(f"[PRIORITY ERROR] msg {msg.id}: {e}")
+            traceback.print_exc()
+            results[msg.id] = "Low"
+
+    elapsed = time.perf_counter() - start_time
+    print(f"\n✅ Sentiment Prioritization: {len(results)} message(s) in {elapsed:.4f}s\n")
     return results
+
+
 
 
 def analyze_moderation_local(messages: list, model_id: str) -> dict:
