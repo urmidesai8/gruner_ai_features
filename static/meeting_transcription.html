@@ -353,6 +353,26 @@
                         </select>
                     </div>
 
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size: 0.9rem; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;">Participant</label>
+                        <div style="display: flex; gap: 16px;">
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                <input type="radio" name="participant" id="participantUser1" value="user-1-id" data-user-name="User 1" checked style="cursor: pointer;">
+                                User 1
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.9rem; cursor: pointer;">
+                                <input type="radio" name="participant" id="participantUser2" value="user-2-id" data-user-name="User 2" style="cursor: pointer;">
+                                User 2
+                            </label>
+                        </div>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <label for="meetingAgendaInput" style="font-size: 0.9rem; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;">Meeting Agenda (optional)</label>
+                        <input type="text" id="meetingAgendaInput" placeholder="e.g., Weekly team sync, Project review..." 
+                            style="width: 100%; max-width: 320px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;">
+                    </div>
+
                     <div class="upload-row">
                         <button class="file-button" id="pickFileButton">
                             📁 <span>Choose audio file</span>
@@ -421,11 +441,49 @@
                         <div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>
                     </div>
                 </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <h3>Ask Questions</h3>
+                        <span class="pill" id="qaLatencyPill">–</span>
+                    </div>
+                    <div class="section-body" id="qaBody" style="min-height: 200px;">
+                        <div style="margin-bottom: 12px;">
+                            <label style="font-size: 0.85rem; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;">Who is asking?</label>
+                            <div style="display: flex; gap: 16px;">
+                                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer;">
+                                    <input type="radio" name="qaParticipant" id="qaParticipantUser1" value="user-1-id" data-user-name="User 1" checked style="cursor: pointer;">
+                                    User 1
+                                </label>
+                                <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; cursor: pointer;">
+                                    <input type="radio" name="qaParticipant" id="qaParticipantUser2" value="user-2-id" data-user-name="User 2" style="cursor: pointer;">
+                                    User 2
+                                </label>
+                            </div>
+                        </div>
+                        <div style="margin-bottom: 12px;">
+                            <input type="text" id="qaQueryInput" placeholder="Ask a question about your meetings..." 
+                                style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;"
+                                onkeypress="if(event.key === 'Enter') askMeetingQuestion()">
+                        </div>
+                        <button class="btn btn-primary" onclick="askMeetingQuestion()" id="askQuestionBtn" style="width: 100%;">
+                            💬 Ask Question
+                        </button>
+                        <div id="qaResults" style="margin-top: 16px; display: none;"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        // Define unique user IDs (using deterministic UUIDs)
+        // These are consistent IDs for User 1 and User 2
+        const USER_IDS = {
+            'user-1-id': '550e8400-e29b-41d4-a716-446655440001', // UUID for User 1
+            'user-2-id': '550e8400-e29b-41d4-a716-446655440002'  // UUID for User 2
+        };
+
         const meetingFileInput = document.getElementById('meetingFileInput');
         const pickFileButton = document.getElementById('pickFileButton');
         const selectedFilename = document.getElementById('selectedFilename');
@@ -441,6 +499,9 @@
         const transcriptLatencyPill = document.getElementById('transcriptLatencyPill');
         const summaryLatencyPill = document.getElementById('summaryLatencyPill');
         const tasksLatencyPill = document.getElementById('tasksLatencyPill');
+        const qaLatencyPill = document.getElementById('qaLatencyPill');
+        const qaResults = document.getElementById('qaResults');
+        const askQuestionBtn = document.getElementById('askQuestionBtn');
 
         let uploadedFilename = null;
         let transcriptText = '';
@@ -502,11 +563,23 @@
                 // 2) Generate transcription with /transcribe-meeting-file
                 const asrModelSelect = document.getElementById('asrModelSelect');
                 const asrModel = asrModelSelect ? asrModelSelect.value : 'whisper-large-v3';
+                // Get participant and agenda
+                const participantRadio = document.querySelector('input[name="participant"]:checked');
+                const participantKey = participantRadio ? participantRadio.value : 'user-1-id';
+                const participantId = USER_IDS[participantKey] || USER_IDS['user-1-id']; // Get actual UUID
+                const meetingAgenda = document.getElementById('meetingAgendaInput').value.trim() || null;
+
                 const t0 = performance.now();
                 const transcribeResp = await fetch('/api/features/transcribe-meeting-file', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filename: uploadedFilename, asr_model: asrModel }),
+                    body: JSON.stringify({ 
+                        filename: uploadedFilename, 
+                        asr_model: asrModel,
+                        participant_ids: [participantId],
+                        meeting_agenda: meetingAgenda,
+                        store_in_qdrant: true
+                    }),
                 });
 
                 const transcribeData = await transcribeResp.json();
@@ -708,6 +781,84 @@
                 return `<div class="transcript-line-block"><span class="transcript-line">${escapeHtml(line)}</span></div>`;
             });
             return parts.join('');
+        }
+
+        async function askMeetingQuestion() {
+            const queryInput = document.getElementById('qaQueryInput');
+            const query = queryInput.value.trim();
+            
+            if (!query) {
+                alert('Please enter a question.');
+                return;
+            }
+
+            const participantRadio = document.querySelector('input[name="qaParticipant"]:checked');
+            const participantKey = participantRadio ? participantRadio.value : 'user-1-id';
+            const participantId = USER_IDS[participantKey] || USER_IDS['user-1-id']; // Get actual UUID
+
+            askQuestionBtn.disabled = true;
+            qaResults.style.display = 'block';
+            qaResults.innerHTML = '<div class="muted">Searching meetings and generating answer...</div>';
+
+            try {
+                const t0 = performance.now();
+                const resp = await fetch('/api/features/meeting_ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: query,
+                        participant_id: participantId,
+                        limit: 3,
+                        score_threshold: 0.3,
+                    }),
+                });
+
+                const data = await resp.json();
+                if (!resp.ok) {
+                    throw new Error(data.detail || 'Question answering failed');
+                }
+
+                const t1 = performance.now();
+                const seconds = ((t1 - t0) / 1000).toFixed(1);
+                if (qaLatencyPill) {
+                    qaLatencyPill.textContent = `${seconds}s`;
+                }
+
+                const answer = data.answer || 'No answer generated.';
+                const sources = data.sources || [];
+
+                let html = `
+                    <div style="padding: 12px; background: #f0f9ff; border-radius: 8px; border-left: 3px solid #3b82f6; margin-bottom: 12px;">
+                        <div style="font-weight: 600; color: #111827; margin-bottom: 6px;">Answer:</div>
+                        <div style="color: #374151; white-space: pre-wrap;">${escapeHtml(answer)}</div>
+                    </div>
+                `;
+
+                if (sources.length > 0) {
+                    html += `
+                        <div style="margin-top: 12px;">
+                            <div style="font-weight: 600; color: #111827; margin-bottom: 6px; font-size: 0.9rem;">Sources:</div>
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
+                                ${sources.map(source => `
+                                    <div style="padding: 8px; background: #f9fafb; border-radius: 6px; font-size: 0.85rem;">
+                                        <div style="font-weight: 600; color: #374151;">${escapeHtml(source.meeting_agenda || 'No agenda')}</div>
+                                        <div style="color: #6b7280; margin-top: 4px;">
+                                            ${escapeHtml(source.meeting_time)} • Score: ${(source.similarity_score * 100).toFixed(1)}%
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                qaResults.innerHTML = html;
+            } catch (error) {
+                console.error(error);
+                qaResults.innerHTML = `<div class="error-text">Error: ${escapeHtml(error.message || 'Unknown error')}</div>`;
+            } finally {
+                askQuestionBtn.disabled = false;
+            }
         }
     </script>
 </body>

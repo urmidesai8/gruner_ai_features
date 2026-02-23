@@ -15,6 +15,9 @@ class Settings:
     QDRANT_GROUP_COLLECTION: str = os.getenv(
         "QDRANT_GROUP_COLLECTION", "group_chats"
     )
+    QDRANT_MEETING_TRANSCRIPTION_COLLECTION: str = os.getenv(
+        "QDRANT_MEETING_TRANSCRIPTION_COLLECTION", "meeting_transcription"
+    )
     MODEL_CACHE_DIR: str = os.getenv("MODEL_CACHE_DIR", None)
     # Redis settings
     REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")

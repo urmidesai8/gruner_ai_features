@@ -51,6 +51,7 @@ from ...services.local_feature_service import (
 )
 from ...services.meeting_task_service import extract_meeting_tasks
 from ...services.chat_search_service import search_chat_messages
+from ...services.meeting_transcription_service import store_meeting_transcription, ask_meeting_question
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -95,6 +96,17 @@ class ChatSearchRequest(BaseModel):
     username: Optional[str] = None  # Filter by sender username
 
 
+class MeetingAskRequest(BaseModel):
+    """
+    Request body for asking questions about meeting transcriptions.
+    """
+    query: str
+    participant_id: str  # User ID asking the question (filters meetings they participated in)
+    limit: Optional[int] = 3  # Maximum number of relevant meetings to consider
+    score_threshold: Optional[float] = 0.3  # Minimum similarity score for relevant meetings
+    model: Optional[str] = None  # Optional LLM model for generating answer
+
+
 class MeetingAudioFileRequest(BaseModel):
     """
     Request body for meeting-specific transcription directly from an uploaded file.
@@ -106,6 +118,9 @@ class MeetingAudioFileRequest(BaseModel):
     filename: str
     model: Optional[str] = None  # LLM model for speaker formatting
     asr_model: Optional[str] = "whisper-large-v3"  # ASR: whisper-large-v3 | openai/whisper-large-v3 (local) | microsoft/VibeVoice-ASR | facebook/seamless-m4t-medium
+    participant_ids: Optional[List[str]] = None  # List of participant user IDs
+    meeting_agenda: Optional[str] = None  # Meeting agenda/topic
+    store_in_qdrant: Optional[bool] = True  # Whether to store transcription in Qdrant
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -738,7 +753,7 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
                 with open(file_path, "rb") as audio_file:
                     raw_transcription = transcribe_audio((request.filename, audio_file))
             segments = []
-        elif asr_model in ("whisper-large-v3", "openai/whisper-small"):
+        elif asr_model in ("openai/whisper-small"):
             # Local Whisper (Transformers): load once per model, then from cache
             raw_transcription, segments = await run_in_threadpool(
                 transcribe_audio_whisper_local, str(file_path), asr_model
@@ -769,13 +784,32 @@ async def transcribe_meeting_file(request: MeetingAudioFileRequest) -> JSONRespo
                 }
             )
 
-        return JSONResponse(
-            content={
-                "transcription": raw_transcription,
-                "formatted_transcription": formatted_transcription,
-                "segments": segments if segments else None,
-            }
-        )
+        response_data = {
+            "transcription": raw_transcription,
+            "formatted_transcription": formatted_transcription,
+            "segments": segments if segments else None,
+        }
+        
+        # Store transcription in Qdrant if requested and participant_ids provided
+        if request.store_in_qdrant and request.participant_ids:
+            try:
+                storage_result = store_meeting_transcription(
+                    transcription=raw_transcription,
+                    participant_ids=request.participant_ids,
+                    meeting_agenda=request.meeting_agenda,
+                )
+                response_data["meeting_id"] = storage_result["meeting_id"]
+                response_data["stored_in_qdrant"] = True
+                response_data["meeting_time"] = storage_result["meeting_time"]
+            except Exception as e:
+                # Don't fail the transcription if storage fails
+                print(f"Warning: Failed to store transcription in Qdrant: {e}")
+                response_data["stored_in_qdrant"] = False
+                response_data["storage_error"] = str(e)
+        else:
+            response_data["stored_in_qdrant"] = False
+        
+        return JSONResponse(content=response_data)
     except HTTPException:
         raise
     except Exception as e:
@@ -939,4 +973,68 @@ async def chat_search(
         raise HTTPException(
             status_code=500,
             detail=f"Chat search failed: {str(e)}",
+        ) from e
+
+
+@router.post("/meeting_ask")
+async def meeting_ask(
+    request: MeetingAskRequest,
+) -> JSONResponse:
+    """
+    Answer questions based on meeting transcriptions.
+    
+    This endpoint:
+    1. Filters meetings where the participant_id is in the participant_ids list
+    2. Searches those meetings for relevant information
+    3. Generates an answer using LLM based on the relevant meeting transcriptions
+    
+    Args:
+        query: User's question
+        participant_id: User ID asking the question (filters meetings they participated in)
+        limit: Maximum number of relevant meetings to consider (default: 3)
+        score_threshold: Minimum similarity score for relevant meetings (default: 0.3)
+        model: Optional LLM model for generating answer
+    
+    Returns:
+        {
+            "answer": "Generated answer based on meeting transcriptions",
+            "relevant_meetings": [
+                {
+                    "meeting_id": "...",
+                    "meeting_time": "...",
+                    "meeting_agenda": "...",
+                    "similarity_score": 0.85
+                },
+                ...
+            ],
+            "sources": [
+                {
+                    "meeting_id": "...",
+                    "meeting_time": "...",
+                    "meeting_agenda": "...",
+                    "similarity_score": 0.85
+                },
+                ...
+            ]
+        }
+    """
+    if not request.query or not request.query.strip():
+        raise HTTPException(status_code=400, detail="Query is required.")
+    
+    if not request.participant_id or not request.participant_id.strip():
+        raise HTTPException(status_code=400, detail="Participant ID is required.")
+    
+    try:
+        result = ask_meeting_question(
+            query=request.query,
+            participant_id=request.participant_id,
+            limit=request.limit or 3,
+            score_threshold=request.score_threshold or 0.3,
+            model=request.model,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting Q&A failed: {str(e)}",
         ) from e
