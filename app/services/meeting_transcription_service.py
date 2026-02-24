@@ -248,7 +248,6 @@ def ask_meeting_question(
     if not relevant_meetings:
         return {
             "answer": "I couldn't find any relevant meetings for your question.",
-            "relevant_meetings": [],
             "sources": [],
         }
     
@@ -309,7 +308,6 @@ Provide a clear, detailed answer based on the transcriptions. Include relevant c
             # Fallback: return relevant transcriptions without LLM answer
             return {
                 "answer": f"Found {len(relevant_meetings)} relevant meeting(s). Please review the transcriptions below.",
-                "relevant_meetings": relevant_meetings,
                 "sources": [
                     {
                         "meeting_id": m.get("meeting_id"),
@@ -337,7 +335,6 @@ Provide a clear, detailed answer based on the transcriptions. Include relevant c
         
         return {
             "answer": answer,
-            "relevant_meetings": relevant_meetings,
             "sources": [
                 {
                     "meeting_id": m.get("meeting_id"),
@@ -352,7 +349,6 @@ Provide a clear, detailed answer based on the transcriptions. Include relevant c
         # Fallback on error
         return {
             "answer": f"Found {len(relevant_meetings)} relevant meeting(s), but encountered an error generating the answer: {str(e)}",
-            "relevant_meetings": relevant_meetings,
             "sources": [
                 {
                     "meeting_id": m.get("meeting_id"),
