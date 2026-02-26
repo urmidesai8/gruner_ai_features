@@ -373,6 +373,18 @@
                             style="width: 100%; max-width: 320px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;">
                     </div>
 
+                    <div style="margin-bottom: 12px;">
+                        <label style="font-size: 0.9rem; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;">Agenda items (for Agenda vs Discussion)</label>
+                        <div id="agendaItemsContainer" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px;"></div>
+                        <button type="button" class="btn btn-secondary" id="addAgendaItemBtn" style="font-size: 0.85rem;">+ Add agenda item</button>
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label for="actualMeetingMinutesInput" style="font-size: 0.9rem; font-weight: 600; color: #374151; display: block; margin-bottom: 6px;">Actual meeting duration (minutes)</label>
+                        <input type="number" id="actualMeetingMinutesInput" min="1" max="480" placeholder="e.g. 48" 
+                            style="width: 100%; max-width: 120px; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.9rem;">
+                        <span class="hint">Total length of the meeting in minutes.</span>
+                    </div>
+
                     <div class="upload-row">
                         <button class="file-button" id="pickFileButton">
                             📁 <span>Choose audio file</span>
@@ -383,6 +395,11 @@
 
                     <div class="hint">
                         Files are first stored on the server, then transcribed via <code>/transcribe-meeting-file</code>.
+                    </div>
+                    <div style="margin-top: 12px;">
+                        <label for="pasteTranscriptArea" style="font-size: 0.85rem; font-weight: 600; color: #6b7280; display: block; margin-bottom: 4px;">Paste transcript (for testing)</label>
+                        <textarea id="pasteTranscriptArea" placeholder="Paste a transcript here to test Agenda vs Discussion without uploading audio..." rows="3" style="width: 100%; padding: 8px 12px; border-radius: 8px; border: 1px solid #e5e7eb; font-size: 0.85rem; resize: vertical;"></textarea>
+                        <button type="button" class="btn btn-secondary" id="usePastedTranscriptBtn" style="margin-top: 6px; font-size: 0.82rem;">Use pasted transcript</button>
                     </div>
 
                     <div class="primary-actions">
@@ -439,6 +456,19 @@
                     </div>
                     <div class="section-body" id="tasksBody">
                         <div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
+                        <h3>Agenda vs Discussion Intelligence</h3>
+                        <span class="pill" id="agendaLatencyPill">–</span>
+                    </div>
+                    <div class="section-body" id="agendaBody" style="min-height: 100px;">
+                        <div class="muted">Add agenda items and actual meeting duration (left), then transcribe. Click "Analyze agenda vs discussion" to compare planned vs actual (overruns, missed topics, off-agenda).</div>
+                    </div>
+                    <div class="primary-actions" style="margin-top: 10px;">
+                        <button class="btn btn-secondary" id="analyzeAgendaBtn" disabled>📊 Analyze agenda vs discussion</button>
                     </div>
                 </div>
 
@@ -502,9 +532,16 @@
         const qaLatencyPill = document.getElementById('qaLatencyPill');
         const qaResults = document.getElementById('qaResults');
         const askQuestionBtn = document.getElementById('askQuestionBtn');
+        const agendaItemsContainer = document.getElementById('agendaItemsContainer');
+        const addAgendaItemBtn = document.getElementById('addAgendaItemBtn');
+        const actualMeetingMinutesInput = document.getElementById('actualMeetingMinutesInput');
+        const agendaBody = document.getElementById('agendaBody');
+        const agendaLatencyPill = document.getElementById('agendaLatencyPill');
+        const analyzeAgendaBtn = document.getElementById('analyzeAgendaBtn');
 
         let uploadedFilename = null;
         let transcriptText = '';
+        let agendaItems = [];
 
         pickFileButton.addEventListener('click', () => {
             meetingFileInput.click();
@@ -525,6 +562,8 @@
             transcriptBody.classList.add('empty');
             summaryBody.innerHTML = '<div class="muted">Run "Analyze meeting" after transcription to generate a structured summary, key points, and action items.</div>';
             tasksBody.innerHTML = '<div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>';
+            if (agendaBody) agendaBody.innerHTML = '<div class="muted">Add agenda items and actual meeting duration (left), then transcribe. Click "Analyze agenda vs discussion" to compare planned vs actual.</div>';
+            if (analyzeAgendaBtn) analyzeAgendaBtn.disabled = true;
             startTranscriptionBtn.disabled = false;
             analyzeMeetingBtn.disabled = true;
             extractTasksBtn.disabled = true;
@@ -611,6 +650,7 @@
                 updateStatus('Transcription complete', 'You can now run meeting analysis or extract tasks.', 'done');
                 analyzeMeetingBtn.disabled = !transcriptText;
                 extractTasksBtn.disabled = !transcriptText;
+                updateAgendaAnalyzeButtonState();
             } catch (error) {
                 console.error(error);
                 updateStatus('Error', error.message || 'Something went wrong during transcription.', 'error');
@@ -765,6 +805,160 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function renderAgendaRows() {
+            if (!agendaItemsContainer) return;
+            agendaItemsContainer.innerHTML = '';
+            agendaItems.forEach((item, idx) => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; gap: 8px; align-items: center; flex-wrap: wrap;';
+                row.innerHTML = `
+                    <input type="text" data-agenda-title placeholder="Topic" value="${escapeHtml(item.title)}" style="flex: 1; min-width: 120px; padding: 6px 10px; border-radius: 6px; border: 1px solid #e5e7eb; font-size: 0.88rem;">
+                    <input type="number" data-agenda-minutes placeholder="Min" min="1" max="120" value="${item.planned_minutes}" style="width: 60px; padding: 6px 10px; border-radius: 6px; border: 1px solid #e5e7eb; font-size: 0.88rem;">
+                    <button type="button" class="btn btn-secondary" data-remove-agenda style="padding: 6px 10px; font-size: 0.8rem;">Remove</button>
+                `;
+                const titleInput = row.querySelector('[data-agenda-title]');
+                const minInput = row.querySelector('[data-agenda-minutes]');
+                const removeBtn = row.querySelector('[data-remove-agenda]');
+                titleInput.addEventListener('change', () => { agendaItems[idx].title = titleInput.value.trim(); });
+                minInput.addEventListener('change', () => { agendaItems[idx].planned_minutes = parseInt(minInput.value, 10) || 0; });
+                removeBtn.addEventListener('click', () => {
+                    agendaItems.splice(idx, 1);
+                    renderAgendaRows();
+                    updateAgendaAnalyzeButtonState();
+                });
+                agendaItemsContainer.appendChild(row);
+            });
+        }
+
+        function getAgendaItemsFromUI() {
+            const titles = agendaItemsContainer ? agendaItemsContainer.querySelectorAll('[data-agenda-title]') : [];
+            const mins = agendaItemsContainer ? agendaItemsContainer.querySelectorAll('[data-agenda-minutes]') : [];
+            const out = [];
+            for (let i = 0; i < titles.length; i++) {
+                const title = (titles[i] && titles[i].value) ? titles[i].value.trim() : '';
+                const planned_minutes = (mins[i] && mins[i].value) ? parseInt(mins[i].value, 10) : 0;
+                if (title) out.push({ title, planned_minutes: planned_minutes || 0 });
+            }
+            return out.length ? out : agendaItems.slice();
+        }
+
+        function updateAgendaAnalyzeButtonState() {
+            if (!analyzeAgendaBtn) return;
+            const items = getAgendaItemsFromUI();
+            const actualMin = actualMeetingMinutesInput ? (parseInt(actualMeetingMinutesInput.value, 10) || 0) : 0;
+            analyzeAgendaBtn.disabled = !transcriptText || items.length === 0 || actualMin <= 0;
+        }
+
+        if (addAgendaItemBtn) {
+            addAgendaItemBtn.addEventListener('click', () => {
+                agendaItems.push({ title: '', planned_minutes: 5 });
+                renderAgendaRows();
+                updateAgendaAnalyzeButtonState();
+            });
+        }
+        if (actualMeetingMinutesInput) {
+            actualMeetingMinutesInput.addEventListener('input', updateAgendaAnalyzeButtonState);
+            actualMeetingMinutesInput.addEventListener('change', updateAgendaAnalyzeButtonState);
+        }
+
+        const pasteTranscriptArea = document.getElementById('pasteTranscriptArea');
+        const usePastedTranscriptBtn = document.getElementById('usePastedTranscriptBtn');
+        if (usePastedTranscriptBtn && pasteTranscriptArea) {
+            usePastedTranscriptBtn.addEventListener('click', () => {
+                transcriptText = (pasteTranscriptArea.value || '').trim();
+                if (!transcriptText) {
+                    alert('Please paste a transcript first.');
+                    return;
+                }
+                transcriptBody.textContent = transcriptText;
+                transcriptBody.classList.remove('empty');
+                analyzeMeetingBtn.disabled = false;
+                extractTasksBtn.disabled = false;
+                updateAgendaAnalyzeButtonState();
+            });
+        }
+
+        if (analyzeAgendaBtn) {
+            analyzeAgendaBtn.addEventListener('click', async () => {
+                const items = getAgendaItemsFromUI();
+                const actualMinutes = actualMeetingMinutesInput ? (parseInt(actualMeetingMinutesInput.value, 10) || 0) : 0;
+                if (!transcriptText) {
+                    alert('No transcript available. Please transcribe the recording first.');
+                    return;
+                }
+                if (items.length === 0) {
+                    alert('Please add at least one agenda item.');
+                    return;
+                }
+                if (actualMinutes <= 0) {
+                    alert('Please enter the actual meeting duration in minutes.');
+                    return;
+                }
+
+                analyzeAgendaBtn.disabled = true;
+                agendaBody.innerHTML = '<div class="muted">Analyzing agenda vs discussion…</div>';
+
+                try {
+                    const t0 = performance.now();
+                    const resp = await fetch('/api/features/meeting/agenda-intelligence', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            transcript: transcriptText,
+                            agenda_items: items,
+                            actual_meeting_minutes: actualMinutes,
+                        }),
+                    });
+                    const data = await resp.json();
+                    const t1 = performance.now();
+                    if (agendaLatencyPill) agendaLatencyPill.textContent = ((t1 - t0) / 1000).toFixed(1) + 's';
+
+                    if (!resp.ok) {
+                        throw new Error(data.detail || 'Agenda analysis failed');
+                    }
+                    renderAgendaInsights(data);
+                } catch (err) {
+                    agendaBody.innerHTML = '<div class="error-text">Error: ' + escapeHtml(err.message || 'Unknown error') + '</div>';
+                } finally {
+                    analyzeAgendaBtn.disabled = false;
+                    updateAgendaAnalyzeButtonState();
+                }
+            });
+        }
+
+        function renderAgendaInsights(data) {
+            const items = data.agenda_items || [];
+            const offAgenda = data.off_agenda_topics || [];
+            const insights = data.insights || [];
+
+            let html = '<div class="bullets" style="margin-bottom: 12px;">';
+            html += '<p><strong>Planned vs actual</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+            items.forEach(it => {
+                const status = it.status || '';
+                const diff = (it.actual_minutes != null && it.planned_minutes != null) ? (it.actual_minutes - it.planned_minutes) : 0;
+                const diffStr = diff > 0 ? '+' + diff : (diff < 0 ? diff : '');
+                html += '<li style="margin-bottom: 4px;">' + escapeHtml(it.title) + ': planned ' + (it.planned_minutes || 0) + ' min, actual ' + (it.actual_minutes ?? 0) + ' min ' + (diffStr ? '(' + diffStr + ') ' : '') + '<span class="tag">' + escapeHtml(status) + '</span></li>';
+            });
+            html += '</ul></div>';
+
+            if (offAgenda.length > 0) {
+                html += '<p><strong>Off-agenda topics</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                offAgenda.forEach(o => {
+                    html += '<li style="margin-bottom: 4px;">' + escapeHtml(o.title) + ' (' + (o.actual_minutes || 0) + ' min)</li>';
+                });
+                html += '</ul>';
+            }
+
+            if (insights.length > 0) {
+                html += '<p><strong>Insights</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                insights.forEach(s => {
+                    html += '<li style="margin-bottom: 4px;">' + escapeHtml(s) + '</li>';
+                });
+                html += '</ul>';
+            }
+            agendaBody.innerHTML = html;
         }
 
         /** Render transcript with [HH:MM:SS] timestamps and speakers; escapes content for safety. */
