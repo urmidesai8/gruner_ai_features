@@ -55,7 +55,10 @@ from ...services.meeting_task_service import extract_meeting_tasks
 from ...services.chat_search_service import search_chat_messages
 from ...services.meeting_transcription_service import store_meeting_transcription, ask_meeting_question
 from ...services.document_extraction_service import extract_document_text_and_tables
-from ...services.document_extraction_qdrant_service import store_document_extraction
+from ...services.document_extraction_qdrant_service import (
+    store_document_extraction,
+    get_document_extraction,
+)
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -100,6 +103,17 @@ class DocumentTextExtractionRequest(BaseModel):
     model: Optional[str] = None  # Optional LLM model for formatting/summary
     uploaded_user_id: Optional[str] = None  # From /upload-document; stored in Qdrant
     doc_upload_time: Optional[str] = None  # From /upload-document; stored in Qdrant
+
+
+class DocumentQARequest(BaseModel):
+    """
+    Request body for document question-answering based on extracted text in Qdrant.
+    """
+
+    doc_id: str
+    uploaded_user_id: str
+    question: str
+    model: Optional[str] = None
 
 
 class ChatSearchRequest(BaseModel):
@@ -873,6 +887,54 @@ async def document_text_extraction(
             status_code=500,
             detail=f"Document extraction failed: {str(e)}",
         ) from e
+
+
+@router.post("/document-qa")
+async def document_qa(request: DocumentQARequest) -> JSONResponse:
+    """
+    Answer a question based on a specific document's extracted text in Qdrant.
+
+    The document is uniquely identified by (doc_id, uploaded_user_id). Any user can
+    ask questions about a document, but we always match both fields to ensure the
+    correct document extraction is used.
+    """
+    if not request.doc_id or not request.uploaded_user_id:
+        raise HTTPException(status_code=400, detail="doc_id and uploaded_user_id are required.")
+
+    payload = get_document_extraction(
+        doc_id=request.doc_id,
+        uploaded_user_id=request.uploaded_user_id,
+    )
+    if not payload:
+        raise HTTPException(status_code=404, detail="No extraction found for this document and user.")
+
+    context_text = (
+        (payload.get("formatted_document_text") or "").strip()
+        or (payload.get("document_summary") or "").strip()
+    )
+    if not context_text:
+        raise HTTPException(status_code=400, detail="Document extraction text is empty.")
+
+    qa_prompt = f"""You are a helpful assistant answering questions based ONLY on the document below.
+
+DOCUMENT:
+\"\"\"{context_text}\"\"\"
+
+Question: {request.question}
+
+If the answer is clearly present, answer concisely.
+If the answer is not present, say you cannot answer based on this document.
+"""
+
+    answer = call_groq_ai(qa_prompt, model_name=request.model)
+    return JSONResponse(
+        content={
+            "doc_id": request.doc_id,
+            "uploaded_user_id": request.uploaded_user_id,
+            "question": request.question,
+            "answer": answer,
+        }
+    )
 
 
 @router.post("/transcribe-file")

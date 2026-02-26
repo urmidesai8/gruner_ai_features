@@ -278,6 +278,41 @@
         }
         .group-msg .sender { font-size: 0.75em; font-weight: bold; margin-bottom: 4px; opacity: 0.9; }
         .group-msg .time { font-size: 0.7em; opacity: 0.6; }
+        .doc-preview {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            margin-top: 6px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            max-width: 100%;
+        }
+        .doc-preview:hover { background: rgba(255,255,255,0.1); }
+        .doc-preview .doc-icon { font-size: 1.2rem; }
+        .doc-preview .doc-name {
+            font-size: 0.85em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .doc-preview .doc-qa-btn {
+            margin-left: auto;
+            padding: 2px 8px;
+            font-size: 0.75em;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.4);
+            background: rgba(15,23,42,0.7);
+            color: #e5e7eb;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .doc-preview .doc-qa-btn:hover {
+            background: rgba(37,99,235,0.9);
+            border-color: rgba(59,130,246,0.9);
+        }
     </style>
 </head>
 <body>
@@ -333,6 +368,22 @@
                 <button type="button" class="doc-modal-close" onclick="closeDocModal()" aria-label="Close">×</button>
             </div>
             <div class="doc-modal-body" id="docModalBody"></div>
+        </div>
+    </div>
+
+    <div id="docQaModalOverlay" class="doc-modal-overlay" onclick="if(event.target===this) closeDocQaModal()">
+        <div class="doc-modal">
+            <div class="doc-modal-header">
+                <span class="title" id="docQaModalTitle">Document Q&A</span>
+                <button type="button" class="doc-modal-close" onclick="closeDocQaModal()" aria-label="Close">×</button>
+            </div>
+            <div class="doc-modal-body" style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                <div id="docQaMeta" style="font-size: 0.8em; color: rgba(229,231,235,0.8);"></div>
+                <textarea id="docQaQuestion" placeholder="Ask a question about this document..." style="width: 100%; min-height: 70px; padding: 8px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(15,23,42,0.8); color: #e5e7eb; resize: vertical;"></textarea>
+                <button id="docQaRunBtn" style="align-self: flex-start; padding: 8px 14px; border-radius: 999px; border: none; cursor: pointer; font-weight: 600; font-size: 0.85rem; background: #2563eb; color: white;">Ask</button>
+                <div id="docQaStatus" style="font-size: 0.8em; color: rgba(156,163,175,0.9);"></div>
+                <div id="docQaAnswer" style="margin-top: 4px; font-size: 0.9em; white-space: pre-wrap;"></div>
+            </div>
         </div>
     </div>
 
@@ -408,11 +459,21 @@
                         const displayName = doc.original_name || doc.filename || 'Document';
                         const isPdf = (url || '').toLowerCase().endsWith('.pdf');
                         const fullUrl = url.startsWith('http') ? url : (window.location.origin + (url.startsWith('/') ? '' : '/') + url);
+                        const uploadedUserId = doc.uploaded_user_id || data.sender_id || '';
+                        const docId = doc.filename || '';
                         bodyHtml = `
                             <div class="sender">${escapeHtml(data.sender)}</div>
-                            <div class="doc-preview" role="button" tabindex="0" data-doc-url="${escapeHtml(fullUrl)}" data-doc-name="${escapeHtml(displayName)}" data-doc-ispdf="${isPdf}">
+                            <div class="doc-preview"
+                                 role="button"
+                                 tabindex="0"
+                                 data-doc-url="${escapeHtml(fullUrl)}"
+                                 data-doc-name="${escapeHtml(displayName)}"
+                                 data-doc-ispdf="${isPdf}"
+                                 data-doc-id="${escapeHtml(docId)}"
+                                 data-doc-uploaded-user-id="${escapeHtml(uploadedUserId)}">
                                 <span class="doc-icon">${isPdf ? '📕' : '📘'}</span>
                                 <span class="doc-name">${escapeHtml(displayName)}</span>
+                                <button type="button" class="doc-qa-btn" title="Ask questions about this document">Q&A</button>
                             </div>
                             <div class="time">${escapeHtml(data.timestamp || '')}</div>
                         `;
@@ -432,6 +493,17 @@
                     preview.addEventListener('click', function () {
                         openDocModal(this.dataset.docUrl, this.dataset.docName, this.dataset.docIspdf === 'true');
                     });
+                    const qaBtn = preview.querySelector('.doc-qa-btn');
+                    if (qaBtn) {
+                        qaBtn.addEventListener('click', function (event) {
+                            event.stopPropagation();
+                            openDocQaModal(
+                                preview.dataset.docId,
+                                preview.dataset.docUploadedUserId,
+                                preview.dataset.docName
+                            );
+                        });
+                    }
                 }
             } else {
                 return;
@@ -495,13 +567,82 @@
                 const docMessage = '[DOC]:' + JSON.stringify({
                     url: data.url,
                     filename: data.filename,
-                    original_name: data.original_name || file.name
+                    original_name: data.original_name || file.name,
+                    uploaded_user_id: data.uploaded_user_id || USER_IDS[userNum]
                 });
                 ws.send(JSON.stringify({ message: docMessage }));
             } catch (e) {
                 alert('Upload failed: ' + (e.message || String(e)));
             }
             input.value = '';
+        }
+
+        let currentQaDocId = null;
+        let currentQaUploadedUserId = null;
+
+        function openDocQaModal(docId, uploadedUserId, displayName) {
+            currentQaDocId = docId;
+            currentQaUploadedUserId = uploadedUserId;
+            const overlay = document.getElementById('docQaModalOverlay');
+            const titleEl = document.getElementById('docQaModalTitle');
+            const metaEl = document.getElementById('docQaMeta');
+            const questionEl = document.getElementById('docQaQuestion');
+            const statusEl = document.getElementById('docQaStatus');
+            const answerEl = document.getElementById('docQaAnswer');
+            if (!overlay || !titleEl || !metaEl || !questionEl || !statusEl || !answerEl) return;
+            titleEl.textContent = displayName || 'Document Q&A';
+            metaEl.textContent = `Doc ID: ${docId || 'n/a'} · Uploaded by: ${uploadedUserId || 'n/a'}`;
+            questionEl.value = '';
+            statusEl.textContent = '';
+            answerEl.textContent = '';
+            overlay.classList.add('show');
+        }
+
+        function closeDocQaModal() {
+            const overlay = document.getElementById('docQaModalOverlay');
+            if (overlay) overlay.classList.remove('show');
+        }
+
+        async function runDocQa() {
+            const questionEl = document.getElementById('docQaQuestion');
+            const statusEl = document.getElementById('docQaStatus');
+            const answerEl = document.getElementById('docQaAnswer');
+            if (!questionEl || !statusEl || !answerEl) return;
+            const question = (questionEl.value || '').trim();
+            if (!question) {
+                statusEl.textContent = 'Please enter a question.';
+                return;
+            }
+            if (!currentQaDocId || !currentQaUploadedUserId) {
+                statusEl.textContent = 'Missing document identifiers.';
+                return;
+            }
+            statusEl.textContent = 'Asking...';
+            answerEl.textContent = '';
+            try {
+                const res = await fetch('/api/features/document-qa', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        doc_id: currentQaDocId,
+                        uploaded_user_id: currentQaUploadedUserId,
+                        question: question
+                    })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.detail || res.statusText);
+                }
+                answerEl.textContent = data.answer || '(No answer returned)';
+                statusEl.textContent = '';
+            } catch (e) {
+                statusEl.textContent = 'Error: ' + (e.message || String(e));
+            }
+        }
+
+        const qaRunBtn = document.getElementById('docQaRunBtn');
+        if (qaRunBtn) {
+            qaRunBtn.addEventListener('click', runDocQa);
         }
 
         function openDocModal(url, displayName, isPdf) {
