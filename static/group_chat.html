@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Group Chat (3 Users)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+            min-height: 100vh;
+            color: #e8e8e8;
+        }
+        .top-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .top-bar h1 { margin: 0; font-size: 1.5rem; font-weight: 600; }
+        .btn-back {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            background: #e94560;
+            color: white;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .btn-back:hover { background: #c73e54; }
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 2fr 1fr;
+            gap: 16px;
+            align-items: start;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        @media (max-width: 900px) {
+            .layout { grid-template-columns: 1fr; }
+        }
+        .user-panel {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .user-panel h2 {
+            margin: 0 0 8px 0;
+            font-size: 1.1rem;
+            padding-bottom: 8px;
+            border-bottom: 2px solid;
+            text-align: center;
+        }
+        .user-1-panel h2 { border-color: #2196F3; color: #64b5f6; }
+        .user-2-panel h2 { border-color: #E91E63; color: #f48fb1; }
+        .user-3-panel h2 { border-color: #4caf50; color: #81c784; }
+        .user-panel textarea {
+            width: 100%;
+            min-height: 70px;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.2);
+            color: #fff;
+            resize: vertical;
+            font-family: inherit;
+        }
+        .user-panel textarea::placeholder { color: rgba(255,255,255,0.4); }
+        .user-panel button {
+            padding: 10px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+        .user-1-panel button { background: #2196F3; color: white; }
+        .user-1-panel button:hover { background: #1976D2; }
+        .user-2-panel button { background: #E91E63; color: white; }
+        .user-2-panel button:hover { background: #C2185B; }
+        .user-3-panel button { background: #4caf50; color: white; }
+        .user-3-panel button:hover { background: #388e3c; }
+        .user-panel .status {
+            font-size: 0.75rem;
+            text-align: center;
+            color: rgba(255,255,255,0.6);
+        }
+        .user-panel .row-send {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .user-panel .row-send button.send-btn { flex: 1; }
+        .btn-doc-upload {
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(0,0,0,0.2);
+            color: rgba(255,255,255,0.9);
+            flex-shrink: 0;
+        }
+        .btn-doc-upload:hover { background: rgba(255,255,255,0.15); }
+        .user-1-panel .btn-doc-upload { border-color: #2196F3; }
+        .user-2-panel .btn-doc-upload { border-color: #E91E63; }
+        .user-3-panel .btn-doc-upload { border-color: #4caf50; }
+        .doc-preview {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+            margin-top: 6px;
+            cursor: pointer;
+            border: 1px solid rgba(255,255,255,0.2);
+            max-width: 100%;
+        }
+        .doc-preview:hover { background: rgba(255,255,255,0.1); }
+        .doc-preview .doc-icon { font-size: 1.2rem; }
+        .doc-preview .doc-name { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .doc-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.75);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .doc-modal-overlay.show { display: flex; }
+        .doc-modal {
+            background: #1a1a2e;
+            border-radius: 12px;
+            max-width: 90vw;
+            max-height: 85vh;
+            width: 800px;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .doc-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            flex-shrink: 0;
+        }
+        .doc-modal-header .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .doc-modal-close {
+            background: transparent;
+            border: none;
+            color: #e8e8e8;
+            cursor: pointer;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 1.2rem;
+        }
+        .doc-modal-close:hover { background: rgba(255,255,255,0.1); }
+        .doc-modal-body {
+            flex: 1;
+            min-height: 0;
+            overflow: auto;
+            padding: 0;
+        }
+        .doc-modal-body iframe {
+            width: 100%;
+            height: 70vh;
+            border: none;
+            display: block;
+        }
+        .doc-modal-body .doc-download-only {
+            padding: 24px;
+            text-align: center;
+            color: rgba(255,255,255,0.7);
+        }
+        .doc-modal-body .doc-download-only a {
+            color: #e94560;
+            text-decoration: underline;
+        }
+        .doc-modal-body .docx-preview {
+            padding: 20px;
+            max-height: 70vh;
+            overflow: auto;
+            background: #0d1117;
+            color: #e8e8e8;
+            line-height: 1.5;
+        }
+        .doc-modal-body .docx-preview p { margin: 0 0 0.5em 0; }
+        .doc-modal-body .docx-preview h1, .doc-modal-body .docx-preview h2, .doc-modal-body .docx-preview h3 { margin: 1em 0 0.5em 0; }
+        .doc-modal-body .docx-preview ul, .doc-modal-body .docx-preview ol { margin: 0.5em 0; padding-left: 1.5em; }
+        .doc-modal-body .doc-loading { padding: 24px; text-align: center; color: rgba(255,255,255,0.7); }
+        .doc-modal-body .docx-error { padding: 24px; color: #e57373; }
+        .group-chat-container {
+            background: rgba(0,0,0,0.25);
+            border: 2px solid #e94560;
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            min-height: 300px;
+            max-height: 60vh;
+            box-shadow: 0 0 24px rgba(233, 69, 96, 0.25);
+        }
+        .group-chat-container h2 {
+            margin: 0 0 12px 0;
+            font-size: 1.2rem;
+            color: #e94560;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .group-chat-container h2::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #e94560;
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        #groupMessages {
+            flex: 1;
+            min-height: 0;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            padding: 4px 0;
+        }
+        .group-msg {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 12px;
+            word-wrap: break-word;
+        }
+        .group-msg.system {
+            align-self: center;
+            background: rgba(233, 69, 96, 0.2);
+            color: #f8bbd0;
+            font-size: 0.9em;
+        }
+        .group-msg.user1 {
+            align-self: flex-start;
+            background: rgba(33, 150, 243, 0.35);
+            border-bottom-left-radius: 2px;
+        }
+        .group-msg.user2 {
+            align-self: flex-end;
+            background: rgba(233, 30, 99, 0.35);
+            border-bottom-right-radius: 2px;
+        }
+        .group-msg.user3 {
+            align-self: flex-start;
+            background: rgba(76, 175, 80, 0.35);
+            border-bottom-left-radius: 2px;
+        }
+        .group-msg .sender { font-size: 0.75em; font-weight: bold; margin-bottom: 4px; opacity: 0.9; }
+        .group-msg .time { font-size: 0.7em; opacity: 0.6; }
+    </style>
+</head>
+<body>
+    <div class="top-bar">
+        <h1>Group Chat (3 Users)</h1>
+        <a href="/" class="btn-back">← Back to Chat</a>
+    </div>
+
+    <div class="layout">
+        <div class="user-panel user-1-panel">
+            <h2>User 1</h2>
+            <textarea id="input1" placeholder="Type as User 1..."></textarea>
+            <div class="row-send">
+                <button type="button" class="btn-doc-upload" onclick="triggerDocUpload(1)" title="Upload document (PDF, DOCX)">📄</button>
+                <button class="send-btn" onclick="sendAs(1)">Send</button>
+            </div>
+            <input type="file" id="docInput1" accept=".pdf,.docx" style="display:none" data-user="1" onchange="handleDocFileSelect(1, this)">
+            <div id="status1" class="status">Disconnected</div>
+        </div>
+
+        <div class="group-chat-container">
+            <h2>Group Chat</h2>
+            <div id="groupMessages"></div>
+        </div>
+
+        <div class="user-panel user-2-panel">
+            <h2>User 2</h2>
+            <textarea id="input2" placeholder="Type as User 2..."></textarea>
+            <div class="row-send">
+                <button type="button" class="btn-doc-upload" onclick="triggerDocUpload(2)" title="Upload document (PDF, DOCX)">📄</button>
+                <button class="send-btn" onclick="sendAs(2)">Send</button>
+            </div>
+            <input type="file" id="docInput2" accept=".pdf,.docx" style="display:none" data-user="2" onchange="handleDocFileSelect(2, this)">
+            <div id="status2" class="status">Disconnected</div>
+        </div>
+    </div>
+
+    <div class="user-panel user-3-panel" style="max-width: 400px; margin: 16px auto 0;">
+        <h2>User 3</h2>
+        <textarea id="input3" placeholder="Type as User 3..."></textarea>
+        <div class="row-send">
+            <button type="button" class="btn-doc-upload" onclick="triggerDocUpload(3)" title="Upload document (PDF, DOCX)">📄</button>
+            <button class="send-btn" onclick="sendAs(3)">Send</button>
+        </div>
+        <input type="file" id="docInput3" accept=".pdf,.docx" style="display:none" data-user="3" onchange="handleDocFileSelect(3, this)">
+        <div id="status3" class="status">Disconnected</div>
+    </div>
+
+    <div id="docModalOverlay" class="doc-modal-overlay" onclick="if(event.target===this) closeDocModal()">
+        <div class="doc-modal">
+            <div class="doc-modal-header">
+                <span class="title" id="docModalTitle">Document</span>
+                <button type="button" class="doc-modal-close" onclick="closeDocModal()" aria-label="Close">×</button>
+            </div>
+            <div class="doc-modal-body" id="docModalBody"></div>
+        </div>
+    </div>
+
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+
+        // Static unique user IDs for User 1, User 2, User 3 (must match backend)
+        const USER_IDS = {
+            1: '550e8400-e29b-41d4-a716-446655440001',
+            2: '550e8400-e29b-41d4-a716-446655440002',
+            3: '550e8400-e29b-41d4-a716-446655440003'
+        };
+        const USER_NAMES = { 1: 'User 1', 2: 'User 2', 3: 'User 3' };
+
+        let ws1, ws2, ws3;
+        const seenMessageKeys = new Set();
+
+        function connect() {
+            const connectOne = (num) => {
+                const uid = USER_IDS[num];
+                const name = USER_NAMES[num];
+                const ws = new WebSocket(
+                    `${protocol}//${host}/ws/group?user_id=${encodeURIComponent(uid)}&username=${encodeURIComponent(name)}`
+                );
+                ws._userNum = num;
+                ws.onopen = () => {
+                    document.getElementById('status' + num).textContent = 'Connected';
+                    document.getElementById('status' + num).style.color = '#81c784';
+                };
+                ws.onclose = () => {
+                    document.getElementById('status' + num).textContent = 'Disconnected';
+                    document.getElementById('status' + num).style.color = '#e57373';
+                };
+                ws.onmessage = (e) => {
+                    const data = JSON.parse(e.data);
+                    appendToGroupChat(data);
+                };
+                return ws;
+            };
+
+            ws1 = connectOne(1);
+            ws2 = connectOne(2);
+            ws3 = connectOne(3);
+        }
+
+        function appendToGroupChat(data) {
+            if (data.type === 'message') {
+                const key = (data.sender_id || '') + '|' + (data.timestamp || '') + '|' + (data.message || '');
+                if (seenMessageKeys.has(key)) return;
+                seenMessageKeys.add(key);
+            } else if (data.type === 'system') {
+                const key = 'system|' + (data.message || '');
+                if (seenMessageKeys.has(key)) return;
+                seenMessageKeys.add(key);
+            }
+
+            const container = document.getElementById('groupMessages');
+            const div = document.createElement('div');
+
+            if (data.type === 'system') {
+                div.className = 'group-msg system';
+                div.textContent = data.message;
+            } else if (data.type === 'message') {
+                const senderNum = data.sender_id === USER_IDS[1] ? 1 : data.sender_id === USER_IDS[2] ? 2 : 3;
+                div.className = 'group-msg user' + senderNum;
+                const msg = data.message || '';
+                let bodyHtml = '';
+                if (msg.startsWith('[DOC]:')) {
+                    try {
+                        const doc = JSON.parse(msg.slice(6));
+                        const url = doc.url || '';
+                        const displayName = doc.original_name || doc.filename || 'Document';
+                        const isPdf = (url || '').toLowerCase().endsWith('.pdf');
+                        const fullUrl = url.startsWith('http') ? url : (window.location.origin + (url.startsWith('/') ? '' : '/') + url);
+                        bodyHtml = `
+                            <div class="sender">${escapeHtml(data.sender)}</div>
+                            <div class="doc-preview" role="button" tabindex="0" data-doc-url="${escapeHtml(fullUrl)}" data-doc-name="${escapeHtml(displayName)}" data-doc-ispdf="${isPdf}">
+                                <span class="doc-icon">${isPdf ? '📕' : '📘'}</span>
+                                <span class="doc-name">${escapeHtml(displayName)}</span>
+                            </div>
+                            <div class="time">${escapeHtml(data.timestamp || '')}</div>
+                        `;
+                    } catch (_) {
+                        bodyHtml = `<div class="sender">${escapeHtml(data.sender)}</div><div>${escapeHtml(msg)}</div><div class="time">${escapeHtml(data.timestamp || '')}</div>`;
+                    }
+                } else {
+                    bodyHtml = `
+                        <div class="sender">${escapeHtml(data.sender)}</div>
+                        <div>${escapeHtml(msg)}</div>
+                        <div class="time">${escapeHtml(data.timestamp || '')}</div>
+                    `;
+                }
+                div.innerHTML = bodyHtml;
+                const preview = div.querySelector('.doc-preview');
+                if (preview) {
+                    preview.addEventListener('click', function () {
+                        openDocModal(this.dataset.docUrl, this.dataset.docName, this.dataset.docIspdf === 'true');
+                    });
+                }
+            } else {
+                return;
+            }
+
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function sendAs(userNum) {
+            const input = document.getElementById('input' + userNum);
+            const text = (input && input.value || '').trim();
+            if (!text) return;
+
+            const ws = userNum === 1 ? ws1 : userNum === 2 ? ws2 : ws3;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Not connected. Wait for connection.');
+                return;
+            }
+
+            ws.send(JSON.stringify({ message: text }));
+            input.value = '';
+        }
+
+        function triggerDocUpload(userNum) {
+            document.getElementById('docInput' + userNum).click();
+        }
+
+        async function handleDocFileSelect(userNum, input) {
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            const ext = (file.name.split('.').pop() || '').toLowerCase();
+            if (ext !== 'pdf' && ext !== 'docx') {
+                alert('Only PDF and DOCX files are allowed.');
+                input.value = '';
+                return;
+            }
+            const ws = userNum === 1 ? ws1 : userNum === 2 ? ws2 : ws3;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                alert('Not connected. Wait for connection.');
+                input.value = '';
+                return;
+            }
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('uploaded_user_id', USER_IDS[userNum]);
+            try {
+                const res = await fetch('/api/features/upload-document', { method: 'POST', body: formData });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || res.statusText);
+                }
+                const data = await res.json();
+                const docMessage = '[DOC]:' + JSON.stringify({
+                    url: data.url,
+                    filename: data.filename,
+                    original_name: data.original_name || file.name
+                });
+                ws.send(JSON.stringify({ message: docMessage }));
+            } catch (e) {
+                alert('Upload failed: ' + (e.message || String(e)));
+            }
+            input.value = '';
+        }
+
+        function openDocModal(url, displayName, isPdf) {
+            const overlay = document.getElementById('docModalOverlay');
+            const titleEl = document.getElementById('docModalTitle');
+            const bodyEl = document.getElementById('docModalBody');
+            if (!overlay || !titleEl || !bodyEl) return;
+            titleEl.textContent = displayName || 'Document';
+            if (isPdf) {
+                bodyEl.innerHTML = '<iframe src="' + escapeHtml(url) + '" title="' + escapeHtml(displayName || '') + '"></iframe>';
+                overlay.classList.add('show');
+            } else {
+                bodyEl.innerHTML = '<div class="doc-loading">Loading document…</div>';
+                overlay.classList.add('show');
+                previewDocx(url, bodyEl, displayName);
+            }
+        }
+
+        async function previewDocx(url, bodyEl, displayName) {
+            const downloadLink = '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener">Download</a>';
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(res.statusText);
+                const arrayBuffer = await res.arrayBuffer();
+                if (typeof mammoth === 'undefined') {
+                    bodyEl.innerHTML = '<div class="doc-download-only">Preview not available. ' + downloadLink + '</div>';
+                    return;
+                }
+                const result = await mammoth.convertToHtml({ arrayBuffer: arrayBuffer });
+                bodyEl.innerHTML = '<div class="docx-preview">' + result.value + '</div>';
+                if (result.messages && result.messages.length) console.warn('Mammoth messages:', result.messages);
+            } catch (e) {
+                bodyEl.innerHTML = '<div class="docx-error">Could not preview document. ' + downloadLink + '</div>';
+            }
+        }
+
+        function closeDocModal() {
+            const overlay = document.getElementById('docModalOverlay');
+            const bodyEl = document.getElementById('docModalBody');
+            if (overlay) overlay.classList.remove('show');
+            if (bodyEl) bodyEl.innerHTML = '';
+        }
+
+        connect();
+    </script>
+</body>
+</html>

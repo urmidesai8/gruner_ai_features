@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, File, UploadFile
+from fastapi import APIRouter, BackgroundTasks, HTTPException, File, Form, UploadFile
 from typing import List, Optional, Dict
 from fastapi.responses import JSONResponse
 import json
@@ -6,6 +6,8 @@ import shutil
 import os
 from pathlib import Path
 import uuid
+from datetime import datetime, timezone
+
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 from ...models.schemas import (
@@ -52,6 +54,8 @@ from ...services.local_feature_service import (
 from ...services.meeting_task_service import extract_meeting_tasks
 from ...services.chat_search_service import search_chat_messages
 from ...services.meeting_transcription_service import store_meeting_transcription, ask_meeting_question
+from ...services.document_extraction_service import extract_document_text_and_tables
+from ...services.document_extraction_qdrant_service import store_document_extraction
 
 class TextSummaryRequest(BaseModel):
     text: str
@@ -82,6 +86,20 @@ class MeetingTasksRequest(BaseModel):
     """
     text: str
     model: Optional[str] = None  # spaCy model name (e.g., "en_core_web_sm" or "en_core_web_trf")
+
+
+class DocumentTextExtractionRequest(BaseModel):
+    """
+    Request body for document text extraction.
+
+    This should be called after /upload-document, using the returned doc_id.
+    Pass uploaded_user_id and doc_upload_time from the upload response to store them in Qdrant.
+    """
+
+    doc_id: str  # Filename (doc_id) as returned by /upload-document
+    model: Optional[str] = None  # Optional LLM model for formatting/summary
+    uploaded_user_id: Optional[str] = None  # From /upload-document; stored in Qdrant
+    doc_upload_time: Optional[str] = None  # From /upload-document; stored in Qdrant
 
 
 class ChatSearchRequest(BaseModel):
@@ -686,6 +704,7 @@ async def create_reminder(request: ReminderCreateRequest) -> JSONResponse:
 UPLOAD_DIR = Path("static/uploads")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+
 @router.post("/upload-audio")
 async def upload_audio_file(file: UploadFile = File(...)) -> JSONResponse:
     try:
@@ -706,6 +725,155 @@ async def upload_audio_file(file: UploadFile = File(...)) -> JSONResponse:
         })
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}") from e
+
+
+ALLOWED_DOC_EXTENSIONS = {".pdf", ".docx"}
+
+
+@router.post("/upload-document")
+async def upload_document_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    uploaded_user_id: Optional[str] = Form(None),
+) -> JSONResponse:
+    """Accept a document file (pdf or docx), save to static/uploads, return immediately. Document-text-extraction runs in background."""
+    ext = (os.path.splitext(file.filename or "")[1] or "").lower()
+    if ext not in ALLOWED_DOC_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only .pdf and .docx are allowed. Got: {ext or 'no extension'}",
+        )
+    try:
+        doc_upload_time = datetime.now(timezone.utc).isoformat()
+        unique_filename = f"{uuid.uuid4()}{ext}"
+        file_path = UPLOAD_DIR / unique_filename
+        with file_path.open("wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        # Trigger document-text-extraction in background (so upload response returns immediately)
+        background_tasks.add_task(
+            _run_document_extraction_pipeline,
+            file_path,
+            unique_filename,
+            uploaded_user_id,
+            doc_upload_time,
+            None,
+        )
+
+        return JSONResponse(content={
+            "doc_id": unique_filename,
+            "url": f"/static/uploads/{unique_filename}",
+            "filename": unique_filename,
+            "original_name": file.filename or unique_filename,
+            "uploaded_user_id": uploaded_user_id,
+            "doc_upload_time": doc_upload_time,
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}") from e
+
+
+def _run_document_extraction_pipeline(
+    file_path: Path,
+    doc_id: str,
+    uploaded_user_id: Optional[str],
+    doc_upload_time: Optional[str],
+    model: Optional[str],
+) -> dict:
+    """
+    Run full document extraction: Docling -> LLM format -> summarize -> store in Qdrant.
+    Returns dict with extraction_id, formatted_document_text, document_summary.
+    """
+    clean_text, tables = extract_document_text_and_tables(file_path)
+
+    format_prompt = f"""You are an expert document reconstruction assistant.
+
+You are given:
+- CLEAN_TEXT: linear text extracted from a document
+- TABLES_JSON: structured table data (list of tables, with headers and rows)
+
+Reconstruct a clean, well-formatted Markdown version of the document.
+
+Requirements:
+- Preserve sections and headings (use Markdown headings like #, ##, etc.).
+- Preserve paragraph structure and lists (bullet/numbered).
+- Recreate tables as Markdown tables using headers and rows from TABLES_JSON.
+- Where the original document likely contained images or figures, infer and
+  insert short placeholders like "[Image: description]" if mentioned in the text.
+- Do NOT output JSON or explanations. Return ONLY the formatted document text.
+
+CLEAN_TEXT:
+\"\"\"{clean_text}\"\"\"
+
+TABLES_JSON:
+\"\"\"{json.dumps(tables, ensure_ascii=False)}\"\"\"
+"""
+
+    formatted_document_text = call_groq_ai(format_prompt, model_name=model)
+    if not formatted_document_text or formatted_document_text.startswith("Error"):
+        formatted_document_text = clean_text
+
+    summary_result = generate_text_summary(formatted_document_text, model=model)
+    document_summary = summary_result.get("summary", "Summary generated.")
+
+    extraction_id = str(uuid.uuid4())
+
+    try:
+        store_document_extraction(
+            doc_id=doc_id,
+            document_summary=document_summary,
+            uploaded_user_id=uploaded_user_id,
+            doc_upload_time=doc_upload_time,
+            formatted_document_text=formatted_document_text,
+        )
+    except Exception as e:
+        print(f"Warning: Failed to store document extraction in Qdrant: {e}")
+
+    return {
+        "extraction_id": extraction_id,
+        "formatted_document_text": formatted_document_text,
+        "document_summary": document_summary,
+    }
+
+
+@router.post("/document-text-extraction")
+async def document_text_extraction(
+    request: DocumentTextExtractionRequest,
+) -> JSONResponse:
+    """
+    Extract and format text from an uploaded document, then summarize it.
+
+    Pipeline:
+    1) Locate document in static/uploads using doc_id from /upload-document.
+    2) Use Docling to extract clean text and structured tables.
+    3) Use an LLM to produce a well-formatted document representation
+       (Markdown) that integrates tables and preserves structure.
+    4) Summarize the formatted document text and store in Qdrant.
+
+    Note: /upload-document now triggers this pipeline automatically; use this
+    endpoint when you need to re-run extraction for an already-uploaded document.
+    """
+    if not request.doc_id:
+        raise HTTPException(status_code=400, detail="doc_id is required.")
+
+    file_path = UPLOAD_DIR / request.doc_id
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Document not found.")
+
+    try:
+        result = _run_document_extraction_pipeline(
+            file_path=file_path,
+            doc_id=request.doc_id,
+            uploaded_user_id=request.uploaded_user_id,
+            doc_upload_time=request.doc_upload_time,
+            model=request.model,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Document extraction failed: {str(e)}",
+        ) from e
+
 
 @router.post("/transcribe-file")
 async def transcribe_saved_file(request: AudioFileRequest) -> JSONResponse:
