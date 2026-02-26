@@ -207,6 +207,11 @@
             color: white;
         }
 
+        .tag-low {
+            background: #4caf50;
+            color: white;
+        }
+
         .tag-safe {
             background: #4caf50;
             color: white;
@@ -571,7 +576,14 @@
         <span id="aiStatusText" style="color: #4caf50; font-weight: bold;">ON</span>
     </div>
 
-    <h1>Dual-User Simulation & AI Features</h1>
+    <div
+        style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; margin-top:60px;">
+        <h1 style="margin:0;">Dual-User Simulation & AI Features</h1>
+        <button onclick="window.location.href='/static/meeting_transcription.html'"
+            style="padding:8px 14px; border-radius:999px; border:none; cursor:pointer; font-weight:600; font-size:0.9rem; background:#111827; color:white; box-shadow:0 8px 18px rgba(15,23,42,0.35);">
+            Meeting Features
+        </button>
+    </div>
 
     <div class="main-container">
         <!-- USER 1 PANEL -->
@@ -591,6 +603,18 @@
                     <option value="hi">Hindi</option>
                     <option value="zh">Chinese</option>
                     <option value="ja">Japanese</option>
+                </select>
+                <label for="user1TranslationModel"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin: 10px 0 5px;">Translation
+                    model:</label>
+                <select id="user1TranslationModel"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">Default</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="tencent/HY-MT1.5-1.8B">Tencent HY-MT1.5 1.8B (HF)</option>
+                    <option value="google-t5/t5-base">Google T5 Base</option>
+                    <option value="facebook/nllb-200-1.3B">Facebook NLLB-200 1.3B</option>
                 </select>
             </div>
             <textarea id="input1" placeholder="Type as User 1..."></textarea>
@@ -621,6 +645,7 @@
                     <option value="none">-- Select Feature --</option>
                     <option value="prioritize">Message Prioritization</option>
                     <option value="moderate">AI Moderation</option>
+                    <option value="sentiment">Sentiment Analysis</option>
                     <option value="smart_replies">Smart Replies</option>
                     <option value="summary">Chat Summary</option>
                     <option value="tasks">Extract Tasks</option>
@@ -628,6 +653,18 @@
                     <option value="translate">Language Translation</option>
                     <option value="transcribe">Audio Transcription</option>
                 </select>
+                <label for="analysisModelSelect" id="analysisModelLabel"><strong>Model:</strong></label>
+                <select id="analysisModelSelect"
+                    style="margin-right: 10px; padding: 5px; border-radius: 5px; border: 1px solid #ccc; font-size: 0.9em;">
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B">DeepSeek R1 Distill Qwen 1.5B</option>
+                    <option value="LiquidAI/LFM2.5-1.2B-Instruct" id="analysisModelOptionLfm">LiquidAI LFM2.5 1.2B
+                        Instruct</option>
+                </select>
+                <span id="vaderBadge"
+                    style="display:none; background:#1565c0; color:#fff; padding:4px 10px; border-radius:5px; font-size:0.9em; margin-right:10px; font-weight:bold;">⚡
+                    VADER (Built-in)</span>
                 <label for="translationLanguage" id="translationLanguageLabel"
                     style="display: none;"><strong>Language:</strong></label>
                 <select id="translationLanguage" style="display: none;">
@@ -669,6 +706,18 @@
                     <option value="hi">Hindi</option>
                     <option value="zh">Chinese</option>
                     <option value="ja">Japanese</option>
+                </select>
+                <label for="user2TranslationModel"
+                    style="font-size: 0.9em; font-weight: bold; display: block; margin: 10px 0 5px;">Translation
+                    model:</label>
+                <select id="user2TranslationModel"
+                    style="width: 100%; padding: 8px; border-radius: 5px; border: 1px solid #ccc;">
+                    <option value="">Default</option>
+                    <option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>
+                    <option value="llama-3.3-70b-versatile">Llama 3.3 70B (Versatile)</option>
+                    <option value="tencent/HY-MT1.5-1.8B">Tencent HY-MT1.5 1.8B (HF)</option>
+                    <option value="google-t5/t5-base">Google T5 Base</option>
+                    <option value="facebook/nllb-200-1.3B">Facebook NLLB-200 1.3B</option>
                 </select>
             </div>
             <textarea id="input2" placeholder="Type as User 2..."></textarea>
@@ -792,6 +841,74 @@
         // AI state tracking
         let aiEnabled = true;
 
+        // Model Definitions for Dynamic Selection
+        const MODEL_OPTIONS = {
+            'none': [],
+            'smart_replies': [
+                { value: 'sentence-transformers/all-MiniLM-L6-v2', text: 'All-MiniLM-L6-v2 (Embedding Bank)' },
+                { value: 'google/flan-t5-base', text: 'Flan-T5 Base (Google) - Default' },
+                { value: 'facebook/bart-large', text: 'BART Large (Facebook)' },
+                { value: 'bigscience/bloomz-7b1', text: 'BLOOMZ 7B1 (BigScience)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'reminders': [
+                { value: 'dslim/bert-ner-bertbaseuncased-conll03', text: 'BERT NER (dslim) - Default' },
+                { value: 'bert-base-uncased', text: 'BERT Base Uncased' },
+                { value: 'xlm-roberta-base', text: 'XLM-RoBERTa (Multilingual)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'prioritize': [
+                { value: 'typeform/distilbert-base-uncased-mnli', text: 'DistilBERT MNLI (Zero-Shot, Fast)' },
+                { value: 'facebook/bart-large-mnli', text: 'BART Large MNLI (Zero-Shot NLI, Accurate)' },
+                { value: 'cross-encoder/nli-deberta-v3-small', text: 'DeBERTa NLI Small (Zero-Shot, Balanced)' },
+                { value: 'distilbert-base-uncased-finetuned-sst-2-english', text: 'DistilBERT SST-2 (Sentiment Heuristic)' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud API)' }
+            ],
+            'moderate': [
+                { value: 'facebook/roberta-base-openai-detector', text: 'RoBERTa OpenAI Detector (FaceBook) - Default' },
+                { value: 'unitary/unbiased-toxic-roberta', text: 'Unbiased Toxic RoBERTa (Unitary)' },
+                { value: 'bert-base-multilingual-cased', text: 'BERT Multilingual' },
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'summary': [
+                { value: 'openai/gpt-oss-120b', text: 'GPT OSS 120B (Offline Default)' },
+                { value: 'llama-3.3-70b-versatile', text: 'Llama 3.3 70B (Groq Cloud)' }
+            ],
+            'tasks': [
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+            ],
+            'translate': [
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' },
+                { value: 'google-t5/t5-base', text: 'Google T5 Base (Local)' },
+                { value: 'facebook/nllb-200-1.3B', text: 'NLLB-200 1.3B (Local)' }
+            ],
+            'transcribe': []
+        };
+
+        function updateModelOptions() {
+            const feature = document.getElementById('featureSelect').value;
+            const modelSelect = document.getElementById('analysisModelSelect');
+            // If feature is none or transcribe, keep simple or clear
+            if (feature === 'none' || feature === 'transcribe') {
+                // Maybe keep default set or clear? Let's leave it as is or reset to default
+                if (feature === 'none') modelSelect.innerHTML = '<option value="llama-3.1-8b-instant">Llama 3.1 8B (Instant)</option>';
+                return;
+            }
+
+            const options = MODEL_OPTIONS[feature] || [];
+            if (options.length === 0) return; // Don't change if no mapping found
+
+            // Clear existing
+            modelSelect.innerHTML = '';
+
+            options.forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.text;
+                modelSelect.appendChild(option);
+            });
+        }
+
         // Utility function to escape HTML
         function escapeHtml(text) {
             const div = document.createElement('div');
@@ -841,8 +958,12 @@
             if (!aiEnabled) {
                 const user1Lang = document.getElementById('user1Language');
                 const user2Lang = document.getElementById('user2Language');
+                const user1Model = document.getElementById('user1TranslationModel');
+                const user2Model = document.getElementById('user2TranslationModel');
                 if (user1Lang) user1Lang.value = '';
                 if (user2Lang) user2Lang.value = '';
+                if (user1Model) user1Model.value = '';
+                if (user2Model) user2Model.value = '';
                 // Remove all existing auto-translations
                 document.querySelectorAll('.auto-translation-box').forEach(el => el.remove());
             }
@@ -920,7 +1041,7 @@
             ws2 = new WebSocket(`${protocol}//${host}/ws?username=${encodeURIComponent(user2Name)}`);
             ws2.onopen = () => updateStatus('status2', 'Connected (Online)', 'green');
             ws2.onclose = () => updateStatus('status2', 'Disconnected', 'red');
-            ws2.onmessage = (e) => handleMessage(e); // Both listen, but backend broadcasts to all
+            ws2.onmessage = (e) => handleMessage(e);
         }
 
         function updateStatus(elemId, text, color) {
@@ -1020,9 +1141,7 @@
             const text = input.value.trim();
             if (!text) return;
 
-            // Send via WS - Do NOT display locally, wait for WS echo/broadcast to other user
             ws1.send(JSON.stringify({ message: text }));
-
             input.value = '';
         }
 
@@ -1031,9 +1150,7 @@
             const text = input.value.trim();
             if (!text) return;
 
-            // Send via WS
             ws2.send(JSON.stringify({ message: text }));
-
             input.value = '';
         }
 
@@ -1198,7 +1315,6 @@
         async function translateAudioMsg(filename, elementId) {
             const container = document.getElementById(elementId);
             container.innerHTML = 'Translating...';
-            const model = getSelectedModel();
 
             // Determine receiving user language
             // Since we don't know who is viewing (simulated one-screen), 
@@ -1224,6 +1340,7 @@
             const sender = msgObj.sender === user1Name ? 'user1' : 'user2';
             const receiver = sender === 'user1' ? 'user2' : 'user1';
             const langSelect = document.getElementById(`${receiver}Language`);
+            const model = getUserTranslationModel(receiver);
 
             if (!langSelect || !langSelect.value) {
                 container.innerHTML = `<span style="color:orange">Please select a language for ${receiver === 'user1' ? user1Name : user2Name}.</span>`;
@@ -1279,6 +1396,23 @@
             const translationSelect = document.getElementById('translationLanguage');
             const toneLabel = document.getElementById('replyToneLabel');
             const toneSelect = document.getElementById('replyTone');
+            const modelLabel = document.getElementById('analysisModelLabel');
+            const modelSelect = document.getElementById('analysisModelSelect');
+            const vaderBadge = document.getElementById('vaderBadge');
+
+            // Update Model Dropdown
+            updateModelOptions();
+
+            // Hide model dropdown for VADER (no LLM needed)
+            if (feature === 'sentiment') {
+                modelLabel.style.display = 'none';
+                modelSelect.style.display = 'none';
+                vaderBadge.style.display = 'inline';
+            } else {
+                modelLabel.style.display = 'inline';
+                modelSelect.style.display = 'inline';
+                vaderBadge.style.display = 'none';
+            }
 
             // Show/hide translation language selector
             if (feature === 'translate') {
@@ -1298,6 +1432,10 @@
                 toneSelect.style.display = 'none';
             }
         });
+
+        // Apply model dropdown state on load (e.g. if Extract Tasks is selected by default)
+        // Apply model dropdown state on load (e.g. if Extract Tasks is selected by default)
+        updateModelOptions();
 
         async function runAIFeature() {
             const feature = document.getElementById('featureSelect').value;
@@ -1374,7 +1512,7 @@
                         tone: tone,
                         model: model
                     };
-                } else if (feature === 'prioritize' || feature === 'moderate') {
+                } else if (feature === 'prioritize' || feature === 'moderate' || feature === 'sentiment') {
                     // Wrap in AIAnalysisRequest structure
                     requestBody = {
                         messages: messagesPayload,
@@ -1409,6 +1547,8 @@
                     applyPriorities(result);
                 } else if (feature === 'moderate') {
                     applyModeration(result);
+                } else if (feature === 'sentiment') {
+                    applySentiment(result);
                 } else if (feature === 'smart_replies') {
                     showSmartReplies(result);
                 }
@@ -1435,6 +1575,7 @@
                     let className = 'tag-normal';
                     if (priority.toLowerCase() === 'urgent') className = 'tag-urgent';
                     if (priority.toLowerCase() === 'high') className = 'tag-high';
+                    if (priority.toLowerCase() === 'low') className = 'tag-low';
 
                     // Always show the tag for clarity now
                     const span = document.createElement('span');
@@ -1445,6 +1586,49 @@
                 }
             });
             if (appliedCount === 0) alert("No priorities returned or IDs mismatch.");
+        }
+
+        function applySentiment(data) {
+            // data format: { "msg_id": { "label": "Positive", "compound": 0.8, ... } }
+            let appliedCount = 0;
+
+            // Remove previous sentiment tags before applying new ones
+            chatMessages.forEach(msg => {
+                const tagContainer = msg.element.querySelector('.ai-tags');
+                if (tagContainer) {
+                    tagContainer.querySelectorAll('.tag-sentiment').forEach(e => e.remove());
+                }
+            });
+
+            chatMessages.forEach(msg => {
+                const sentResult = data[msg.id];
+                if (sentResult) {
+                    const tagContainer = msg.element.querySelector('.ai-tags');
+                    if (!tagContainer) return;
+
+                    const label = sentResult.label || 'Neutral';
+                    const compound = sentResult.compound !== undefined ? sentResult.compound : 0;
+
+                    let tagColor = '#607d8b';   // Neutral - grey
+                    if (label === 'Positive') tagColor = '#388e3c';  // green
+                    if (label === 'Negative') tagColor = '#d32f2f';  // red
+
+                    const span = document.createElement('span');
+                    span.className = 'tag tag-sentiment';
+                    span.style.backgroundColor = tagColor;
+                    span.style.color = '#fff';
+                    span.style.borderRadius = '4px';
+                    span.style.padding = '2px 6px';
+                    span.style.fontSize = '0.78em';
+                    span.style.marginLeft = '4px';
+                    span.title = `VADER Score: ${compound} (pos:${sentResult.pos} neg:${sentResult.neg} neu:${sentResult.neu})`;
+                    span.textContent = `${label === 'Positive' ? '😊' : label === 'Negative' ? '😞' : '😐'} ${label}`;
+                    tagContainer.appendChild(span);
+                    appliedCount++;
+                }
+            });
+
+            if (appliedCount === 0) alert('No sentiment results returned or IDs mismatch.');
         }
 
         function applyModeration(data) {
@@ -1489,7 +1673,20 @@
             const container = document.getElementById('messages');
             const div = document.createElement('div');
             div.className = 'suggestion-box';
-            div.innerHTML = `<strong>AI Suggestions:</strong><br/>`;
+
+            // Format time if available
+            let info = '';
+            if (data.execution_time) {
+                info += ` <span style="font-weight:normal; font-size:0.8em; color:#666;">(${data.execution_time}s)</span>`;
+            }
+            if (data.model_time) {
+                info += ` <span style="font-weight:normal; font-size:0.8em; color:#999;" title="Internal Model Time"> [Model: ${data.model_time}]</span>`;
+            }
+            if (data.source) {
+                info += ` <span style="font-weight:normal; font-size:0.8em; color:#1976d2; margin-left:5px;">[${data.source}]</span>`;
+            }
+
+            div.innerHTML = `<strong>AI Suggestions${info}:</strong><br/>`;
 
             suggestions.forEach(s => {
                 const btn = document.createElement('button');
@@ -1551,6 +1748,7 @@
                     model: model
                 };
 
+                const startTime = performance.now();
                 const response = await fetch('/api/features/chat-summarize', {
                     method: 'POST',
                     headers: {
@@ -1559,6 +1757,7 @@
                     body: JSON.stringify(requestBody)
                 });
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
 
                 if (!response.ok) {
                     const detail = data && data.detail ? data.detail : 'Server returned an error';
@@ -1577,35 +1776,38 @@
 
                 let html = `
                     <div class="summary-section">
+                        <p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p>
+                    </div>
+                    <div class="summary-section">
                         <h3>📋 Overview</h3>
-                        <p>${summary}</p>
+                        <p>${escapeHtml(summary)}</p>
                         <p><strong>Total Messages:</strong> ${totalMessagesCount}</p>
-                        <p><strong>Participants:</strong> ${participants.join(', ')}</p>
+                        <p><strong>Participants:</strong> ${escapeHtml(participants.join(', '))}</p>
                     </div>
                     
                     <div class="summary-section">
                         <h3>💬 What Did I Miss?</h3>
-                        <p>${unreadSummary}</p>
+                        <p>${escapeHtml(unreadSummary)}</p>
                     </div>
                     
                     <div class="summary-section">
                         <h3>📝 Key Points</h3>
                         <ul>
-                            ${bulletPoints.map(point => `<li>${point}</li>`).join('')}
+                            ${bulletPoints.map(point => `<li>${escapeHtml(point)}</li>`).join('')}
                         </ul>
                     </div>
                     
                     <div class="summary-section">
                         <h3>✅ Key Decisions</h3>
                         <ul>
-                            ${keyDecisions.map(decision => `<li>${decision}</li>`).join('')}
+                            ${keyDecisions.map(decision => `<li>${escapeHtml(decision)}</li>`).join('')}
                         </ul>
                     </div>
                     
                     <div class="summary-section">
                         <h3>🎯 Action Items</h3>
                         <ul>
-                            ${actionItems.map(action => `<li>${action}</li>`).join('')}
+                            ${actionItems.map(action => `<li>${escapeHtml(action)}</li>`).join('')}
                         </ul>
                     </div>
                 `;
@@ -1646,6 +1848,7 @@
             try {
                 // Use User 1 as the username for tasks (or could be configurable)
                 const username = user1Name;
+                const startTime = performance.now();
                 const response = await fetch(`/api/features/tasks-classifier?username=${encodeURIComponent(username)}&model=${encodeURIComponent(model)}`, {
                     method: 'POST',
                     headers: {
@@ -1653,6 +1856,7 @@
                     },
                 });
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
 
                 if (!response.ok) {
                     const detail = data && data.detail ? data.detail : 'Server returned an error';
@@ -1663,11 +1867,11 @@
                 loading.style.display = 'none';
 
                 if (tasks.length === 0) {
-                    results.innerHTML = '<p>No tasks found in the current conversation.</p>';
+                    results.innerHTML = `<p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p><p>No tasks found in the current conversation.</p>`;
                     return;
                 }
 
-                const tasksHtml = tasks.map((task, index) => {
+                const tasksHtml = `<p style="font-size: 0.9em; color: #666; margin-bottom: 10px;"><strong>Latency:</strong> ${latencySeconds}s</p>` + tasks.map((task, index) => {
                     const title = task.title || '(untitled task)';
                     const desc = task.description || '';
                     const assignee = task.assignee || 'Unassigned';
@@ -1733,7 +1937,7 @@
             const targetLangLabel = langSelect
                 ? langSelect.options[langSelect.selectedIndex].text
                 : targetLang.toUpperCase();
-            const model = getSelectedModel();
+            const model = null;
 
             statusEl.textContent = `Translating messages to ${targetLangLabel}...`;
 
@@ -2140,7 +2344,7 @@
             const targetLang = langSelect.value;
             const targetLangLabel = langSelect.options[langSelect.selectedIndex].text;
             const results = document.getElementById('transcriptionTranslationResult');
-            const model = getSelectedModel();
+            const model = null;
 
             // Show loading state
             results.innerHTML = `<div style="text-align:center; padding:10px;">Translating to ${targetLangLabel}...</div>`;
@@ -2218,7 +2422,7 @@
             }
 
             try {
-                const model = getSelectedModel();
+                const model = getUserTranslationModel(receivingUser);
                 const payload = [{
                     id: messageObj.id,
                     text: messageObj.message,
@@ -2226,6 +2430,7 @@
                     model: model
                 }];
 
+                const startTime = performance.now();
                 const response = await fetch('/api/features/translate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2238,6 +2443,7 @@
                 }
 
                 const data = await response.json();
+                const latencySeconds = ((performance.now() - startTime) / 1000).toFixed(2);
                 const translations = data && data.translations ? data.translations : {};
                 const translation = translations[messageObj.id];
 
@@ -2251,7 +2457,7 @@
                     const translationDiv = document.createElement('div');
                     translationDiv.className = 'auto-translation-box';
                     translationDiv.innerHTML = `
-                        <div class="translation-header">${receivingUserName} (${targetLangLabel})</div>
+                        <div class="translation-header">${receivingUserName} (${targetLangLabel}) · ${latencySeconds}s</div>
                         <div class="translation-body">${escapeHtml(translation.translated_text)}</div>
                     `;
 
@@ -2307,11 +2513,19 @@
         // Add event listener for AI toggle
         document.getElementById('aiToggle').addEventListener('change', toggleAI);
 
-        // Helper to get selected model (enforcing one model as requested)
+        // Helper to get selected model for analysis (from the Model dropdown beside AI Feature)
         function getSelectedModel() {
-            // User requested to force this model for all services, 
-            // while keeping the UI list visible.
-            return "openai/gpt-oss-120b";
+            const el = document.getElementById('analysisModelSelect');
+            if (el && el.value) return el.value;
+            return "llama-3.1-8b-instant";
+        }
+
+        // Per-user translation model selector (for auto-translation)
+        function getUserTranslationModel(userKey) {
+            const el = document.getElementById(`${userKey}TranslationModel`);
+            if (!el) return null;
+            const v = (el.value || '').trim();
+            return v ? v : null;
         }
 
 
@@ -2329,6 +2543,13 @@
             }
         });
 
+        document.getElementById('user1TranslationModel').addEventListener('change', function () {
+            const lang = document.getElementById('user1Language');
+            if (aiEnabled && lang && lang.value) {
+                retranslateMessagesForUser('user2', 'user1');
+            }
+        });
+
         document.getElementById('user2Language').addEventListener('change', function () {
             if (aiEnabled && this.value) {
                 // Re-translate all messages from User 1
@@ -2336,6 +2557,13 @@
             } else {
                 // Remove all auto-translations for User 2
                 removeAutoTranslationsForUser('user2');
+            }
+        });
+
+        document.getElementById('user2TranslationModel').addEventListener('change', function () {
+            const lang = document.getElementById('user2Language');
+            if (aiEnabled && lang && lang.value) {
+                retranslateMessagesForUser('user1', 'user2');
             }
         });
 
