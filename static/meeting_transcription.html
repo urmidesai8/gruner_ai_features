@@ -474,6 +474,19 @@
 
                 <div class="section">
                     <div class="section-header">
+                        <h3>Meeting Intelligence & Insights</h3>
+                        <span class="pill" id="intelligenceLatencyPill">–</span>
+                    </div>
+                    <div class="section-body" id="intelligenceBody" style="min-height: 100px;">
+                        <div class="muted">Talk-time per participant, sentiment & tension, decision velocity, blockers, dominant topics. Click "Generate insights" after transcription.</div>
+                    </div>
+                    <div class="primary-actions" style="margin-top: 10px;">
+                        <button class="btn btn-secondary" id="generateIntelligenceBtn" disabled>📈 Generate insights</button>
+                    </div>
+                </div>
+
+                <div class="section">
+                    <div class="section-header">
                         <h3>Ask Questions</h3>
                         <span class="pill" id="qaLatencyPill">–</span>
                     </div>
@@ -538,6 +551,9 @@
         const agendaBody = document.getElementById('agendaBody');
         const agendaLatencyPill = document.getElementById('agendaLatencyPill');
         const analyzeAgendaBtn = document.getElementById('analyzeAgendaBtn');
+        const intelligenceBody = document.getElementById('intelligenceBody');
+        const intelligenceLatencyPill = document.getElementById('intelligenceLatencyPill');
+        const generateIntelligenceBtn = document.getElementById('generateIntelligenceBtn');
 
         let uploadedFilename = null;
         let transcriptText = '';
@@ -564,6 +580,8 @@
             tasksBody.innerHTML = '<div class="muted">Click "Extract tasks" after transcription to extract tasks with assignees and due dates.</div>';
             if (agendaBody) agendaBody.innerHTML = '<div class="muted">Add agenda items and actual meeting duration (left), then transcribe. Click "Analyze agenda vs discussion" to compare planned vs actual.</div>';
             if (analyzeAgendaBtn) analyzeAgendaBtn.disabled = true;
+            if (intelligenceBody) intelligenceBody.innerHTML = '<div class="muted">Talk-time per participant, sentiment & tension, decision velocity, blockers, dominant topics. Click "Generate insights" after transcription.</div>';
+            if (generateIntelligenceBtn) generateIntelligenceBtn.disabled = true;
             startTranscriptionBtn.disabled = false;
             analyzeMeetingBtn.disabled = true;
             extractTasksBtn.disabled = true;
@@ -651,6 +669,7 @@
                 analyzeMeetingBtn.disabled = !transcriptText;
                 extractTasksBtn.disabled = !transcriptText;
                 updateAgendaAnalyzeButtonState();
+                if (generateIntelligenceBtn) generateIntelligenceBtn.disabled = !transcriptText;
             } catch (error) {
                 console.error(error);
                 updateStatus('Error', error.message || 'Something went wrong during transcription.', 'error');
@@ -876,8 +895,93 @@
                 transcriptBody.classList.remove('empty');
                 analyzeMeetingBtn.disabled = false;
                 extractTasksBtn.disabled = false;
+                if (generateIntelligenceBtn) generateIntelligenceBtn.disabled = false;
                 updateAgendaAnalyzeButtonState();
             });
+        }
+
+        if (generateIntelligenceBtn) {
+            generateIntelligenceBtn.addEventListener('click', async () => {
+                if (!transcriptText) {
+                    alert('No transcript available. Please transcribe or paste a transcript first.');
+                    return;
+                }
+                generateIntelligenceBtn.disabled = true;
+                intelligenceBody.innerHTML = '<div class="muted">Generating meeting intelligence…</div>';
+                try {
+                    const t0 = performance.now();
+                    const resp = await fetch('/api/features/meeting/intelligence-insights', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ transcript: transcriptText }),
+                    });
+                    const data = await resp.json();
+                    const t1 = performance.now();
+                    if (intelligenceLatencyPill) intelligenceLatencyPill.textContent = ((t1 - t0) / 1000).toFixed(1) + 's';
+                    if (!resp.ok) throw new Error(data.detail || 'Meeting intelligence failed');
+                    renderIntelligenceResults(data);
+                } catch (err) {
+                    intelligenceBody.innerHTML = '<div class="error-text">Error: ' + escapeHtml(err.message || 'Unknown error') + '</div>';
+                } finally {
+                    generateIntelligenceBtn.disabled = false;
+                }
+            });
+        }
+
+        function renderIntelligenceResults(data) {
+            const talkTime = data.talk_time_by_participant || [];
+            const sentiment = data.sentiment_insights || [];
+            const decisionVel = data.decision_velocity || {};
+            const blockers = data.blockers_mentioned || [];
+            const topics = data.dominant_topics || [];
+            const insights = data.insights || [];
+
+            let html = '';
+            if (insights.length > 0) {
+                html += '<p><strong>Insights</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                insights.forEach(s => { html += '<li style="margin-bottom: 4px;">' + escapeHtml(s) + '</li>'; });
+                html += '</ul>';
+            }
+            if (talkTime.length > 0) {
+                html += '<p><strong>Talk-time per participant</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                talkTime.forEach(t => {
+                    const note = t.note ? ' <span class="muted">(' + escapeHtml(t.note) + ')</span>' : '';
+                    html += '<li style="margin-bottom: 4px;">' + escapeHtml(t.participant || 'Unknown') + ': ' + (t.percentage != null ? t.percentage + '%' : '–') + note + '</li>';
+                });
+                html += '</ul>';
+            }
+            if (sentiment.length > 0) {
+                html += '<p><strong>Sentiment & tension</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                sentiment.forEach(s => {
+                    const tension = s.tension_detected ? ' <span class="tag">tension</span>' : '';
+                    html += '<li style="margin-bottom: 4px;">' + escapeHtml(s.segment_or_topic || '') + ' – ' + escapeHtml(s.sentiment || '') + tension + (s.note ? ' ' + escapeHtml(s.note) : '') + '</li>';
+                });
+                html += '</ul>';
+            }
+            if (decisionVel.decisions_count != null || (decisionVel.decisions && decisionVel.decisions.length)) {
+                html += '<p><strong>Decision velocity</strong></p>';
+                if (decisionVel.note) html += '<p class="muted" style="margin: 0 0 6px 0;">' + escapeHtml(decisionVel.note) + '</p>';
+                const decs = decisionVel.decisions || [];
+                if (decs.length) {
+                    html += '<ul style="margin: 0 0 0 16px; padding: 0;">';
+                    decs.forEach(d => { html += '<li style="margin-bottom: 4px;">' + escapeHtml(d.decision || '') + (d.context ? ' ' + escapeHtml(d.context) : '') + '</li>'; });
+                    html += '</ul>';
+                } else if (decisionVel.decisions_count != null) {
+                    html += '<p style="margin: 0;">' + decisionVel.decisions_count + ' decision(s) identified.</p>';
+                }
+            }
+            if (blockers.length > 0) {
+                html += '<p><strong>Blockers / risks mentioned</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                blockers.forEach(b => { html += '<li style="margin-bottom: 4px;">' + escapeHtml(b.blocker || '') + (b.context ? ' – ' + escapeHtml(b.context) : '') + '</li>'; });
+                html += '</ul>';
+            }
+            if (topics.length > 0) {
+                html += '<p><strong>Dominant topics</strong></p><ul style="margin: 0 0 0 16px; padding: 0;">';
+                topics.forEach(t => { html += '<li style="margin-bottom: 4px;">' + escapeHtml(t.topic || '') + (t.relevance ? ' <span class="tag">' + escapeHtml(t.relevance) + '</span>' : '') + '</li>'; });
+                html += '</ul>';
+            }
+            if (!html) html = '<div class="muted">No structured data returned. Check insights above.</div>';
+            intelligenceBody.innerHTML = html;
         }
 
         if (analyzeAgendaBtn) {

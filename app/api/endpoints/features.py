@@ -55,6 +55,7 @@ from ...services.meeting_task_service import extract_meeting_tasks
 from ...services.chat_search_service import search_chat_messages
 from ...services.meeting_transcription_service import store_meeting_transcription, ask_meeting_question
 from ...services.meeting_agenda_service import analyze_agenda_vs_discussion
+from ...services.meeting_intelligence_service import generate_meeting_intelligence
 from ...services.document_extraction_service import extract_document_text_and_tables
 from ...services.document_extraction_qdrant_service import (
     store_document_extraction,
@@ -170,6 +171,16 @@ class AgendaIntelligenceRequest(BaseModel):
     transcript: str
     agenda_items: List[AgendaItem]
     actual_meeting_minutes: int
+    model: Optional[str] = None
+
+
+class MeetingIntelligenceRequest(BaseModel):
+    """
+    Request body for Meeting Intelligence & Insights.
+    Higher-level analytics: talk-time, sentiment/tension, decisions, blockers, dominant topics.
+    """
+    transcript: str
+    segments: Optional[List[Dict]] = None  # Optional: [{start, end, text, speaker?}]
     model: Optional[str] = None
 
 
@@ -1322,4 +1333,31 @@ async def meeting_agenda_intelligence(
         raise HTTPException(
             status_code=500,
             detail=f"Agenda intelligence failed: {str(e)}",
+        ) from e
+
+
+@router.post("/meeting/intelligence-insights")
+async def meeting_intelligence_insights(
+    request: MeetingIntelligenceRequest,
+) -> JSONResponse:
+    """
+    Meeting Intelligence & Insights: higher-level analytics across people, topics, time, and outcomes.
+
+    Produces: talk-time per participant, sentiment & tension detection, decision velocity,
+    blockers/risks mentioned, dominant topics, and human-readable insight bullets.
+    """
+    if not request.transcript or not request.transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcription text is required.")
+
+    try:
+        result = generate_meeting_intelligence(
+            transcript=request.transcript,
+            segments=request.segments,
+            model=request.model,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting intelligence failed: {str(e)}",
         ) from e
