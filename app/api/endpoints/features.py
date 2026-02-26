@@ -58,6 +58,7 @@ from ...services.document_extraction_service import extract_document_text_and_ta
 from ...services.document_extraction_qdrant_service import (
     store_document_extraction,
     get_document_extraction,
+    get_document_extraction_by_original_name_and_user,
 )
 
 class TextSummaryRequest(BaseModel):
@@ -103,6 +104,7 @@ class DocumentTextExtractionRequest(BaseModel):
     model: Optional[str] = None  # Optional LLM model for formatting/summary
     uploaded_user_id: Optional[str] = None  # From /upload-document; stored in Qdrant
     doc_upload_time: Optional[str] = None  # From /upload-document; stored in Qdrant
+    original_name: Optional[str] = None  # Original filename; used for de-duplication
 
 
 class DocumentQARequest(BaseModel):
@@ -759,6 +761,7 @@ async def upload_document_file(
         )
     try:
         doc_upload_time = datetime.now(timezone.utc).isoformat()
+        original_name = file.filename or ""
         unique_filename = f"{uuid.uuid4()}{ext}"
         file_path = UPLOAD_DIR / unique_filename
         with file_path.open("wb") as buffer:
@@ -772,13 +775,14 @@ async def upload_document_file(
             uploaded_user_id,
             doc_upload_time,
             None,
+            original_name,
         )
 
         return JSONResponse(content={
             "doc_id": unique_filename,
             "url": f"/static/uploads/{unique_filename}",
             "filename": unique_filename,
-            "original_name": file.filename or unique_filename,
+            "original_name": original_name or unique_filename,
             "uploaded_user_id": uploaded_user_id,
             "doc_upload_time": doc_upload_time,
         })
@@ -792,11 +796,28 @@ def _run_document_extraction_pipeline(
     uploaded_user_id: Optional[str],
     doc_upload_time: Optional[str],
     model: Optional[str],
+    original_name: Optional[str] = None,
 ) -> dict:
     """
     Run full document extraction: Docling -> LLM format -> summarize -> store in Qdrant.
     Returns dict with extraction_id, formatted_document_text, document_summary.
     """
+    # De-duplication: if we already have extraction for this original_name, reuse it
+    # and avoid recomputing vectors / document extraction.
+    if original_name and uploaded_user_id:
+        existing = get_document_extraction_by_original_name_and_user(
+            original_name, uploaded_user_id
+        )
+        if existing:
+            formatted_document_text = (existing.get("formatted_document_text") or "").strip()
+            document_summary = (existing.get("document_summary") or "").strip() or "Summary generated."
+            extraction_id = str(uuid.uuid4())
+            return {
+                "extraction_id": extraction_id,
+                "formatted_document_text": formatted_document_text,
+                "document_summary": document_summary,
+            }
+
     clean_text, tables = extract_document_text_and_tables(file_path)
 
     format_prompt = f"""You are an expert document reconstruction assistant.
@@ -838,6 +859,7 @@ TABLES_JSON:
             uploaded_user_id=uploaded_user_id,
             doc_upload_time=doc_upload_time,
             formatted_document_text=formatted_document_text,
+            original_name=original_name,
         )
     except Exception as e:
         print(f"Warning: Failed to store document extraction in Qdrant: {e}")
@@ -880,6 +902,7 @@ async def document_text_extraction(
             uploaded_user_id=request.uploaded_user_id,
             doc_upload_time=request.doc_upload_time,
             model=request.model,
+            original_name=request.original_name,
         )
         return JSONResponse(content=result)
     except Exception as e:

@@ -36,8 +36,8 @@ def ensure_document_extraction_collection() -> None:
             print(f"Created Qdrant collection: {DOCUMENT_EXTRACTION_COLLECTION}")
             created = True
 
-        # Ensure payload indexes for filtering by doc_id and uploaded_user_id
-        for field_name in ("doc_id", "uploaded_user_id"):
+        # Ensure payload indexes for filtering by doc_id, uploaded_user_id, and original_name
+        for field_name in ("doc_id", "uploaded_user_id", "original_name"):
             try:
                 client.create_payload_index(
                     collection_name=DOCUMENT_EXTRACTION_COLLECTION,
@@ -60,6 +60,7 @@ def store_document_extraction(
     uploaded_user_id: Optional[str] = None,
     doc_upload_time: Optional[str] = None,
     formatted_document_text: Optional[str] = None,
+    original_name: Optional[str] = None,
 ) -> str:
     """
     Store document extraction details in Qdrant.
@@ -70,6 +71,7 @@ def store_document_extraction(
         uploaded_user_id: Optional; from /upload-document.
         doc_upload_time: Optional; from /upload-document (e.g. ISO UTC).
         formatted_document_text: Optional; formatted full text from /document-text-extraction.
+        original_name: Optional; original filename as uploaded by the user.
 
     Returns:
         The point ID (extraction record id) used in Qdrant.
@@ -83,6 +85,7 @@ def store_document_extraction(
         "doc_upload_time": doc_upload_time or "",
         "document_summary": document_summary or "",
         "formatted_document_text": formatted_document_text or "",
+        "original_name": original_name or "",
     }
 
     vector = embed_text(document_summary or "")
@@ -117,6 +120,46 @@ def get_document_extraction(
             qmodels.FieldCondition(
                 key="doc_id",
                 match=qmodels.MatchValue(value=doc_id),
+            ),
+            qmodels.FieldCondition(
+                key="uploaded_user_id",
+                match=qmodels.MatchValue(value=uploaded_user_id),
+            ),
+        ]
+    )
+
+    points: List[qmodels.ScoredPoint]
+    points, _ = client.scroll(
+        collection_name=DOCUMENT_EXTRACTION_COLLECTION,
+        scroll_filter=flt,
+        limit=1,
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not points:
+        return None
+    return points[0].payload or None
+
+
+def get_document_extraction_by_original_name_and_user(
+    original_name: str,
+    uploaded_user_id: str,
+) -> Optional[dict]:
+    """
+    Fetch a single document_extraction payload by (original_name, uploaded_user_id).
+    Used to avoid duplicate extraction work for the same file name per user.
+    """
+    if not original_name or not uploaded_user_id:
+        return None
+
+    ensure_document_extraction_collection()
+    client = _get_qdrant_client()
+
+    flt = qmodels.Filter(
+        must=[
+            qmodels.FieldCondition(
+                key="original_name",
+                match=qmodels.MatchValue(value=original_name),
             ),
             qmodels.FieldCondition(
                 key="uploaded_user_id",
