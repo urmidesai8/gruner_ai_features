@@ -1,0 +1,34 @@
+{
+  "agenda_items": [
+    {
+      "title": "Sprint status",
+      "planned_minutes": 10,
+      "actual_minutes": 5,
+      "status": "underrun"
+    },
+    {
+      "title": "Release planning",
+      "planned_minutes": 15,
+      "actual_minutes": 30,
+      "status": "overrun"
+    },
+    {
+      "title": "Risks",
+      "planned_minutes": 5,
+      "actual_minutes": 0,
+      "status": "missed"
+    }
+  ],
+  "off_agenda_topics": [
+    {
+      "title": "Vendor pricing",
+      "actual_minutes": 8
+    }
+  ],
+  "insights": [
+    "Agenda overrun: Release planning (+15 min)",
+    "Missed topic: Risks",
+    "Off-agenda discussion: Vendor pricing (8 min)",
+    "Sprint status finished under time (5 min vs 10 min planned)"
+  ]
+}

@@ -54,6 +54,8 @@ from ...services.local_feature_service import (
 from ...services.meeting_task_service import extract_meeting_tasks
 from ...services.chat_search_service import search_chat_messages
 from ...services.meeting_transcription_service import store_meeting_transcription, ask_meeting_question
+from ...services.meeting_agenda_service import analyze_agenda_vs_discussion
+from ...services.meeting_intelligence_service import generate_meeting_intelligence
 from ...services.document_extraction_service import extract_document_text_and_tables
 from ...services.document_extraction_qdrant_service import (
     store_document_extraction,
@@ -155,6 +157,34 @@ class MeetingAudioFileRequest(BaseModel):
     participant_ids: Optional[List[str]] = None  # List of participant user IDs
     meeting_agenda: Optional[str] = None  # Meeting agenda/topic
     store_in_qdrant: Optional[bool] = True  # Whether to store transcription in Qdrant
+
+
+class AgendaItem(BaseModel):
+    """One planned agenda topic with allocated minutes."""
+    title: str
+    planned_minutes: int
+
+
+class AgendaIntelligenceRequest(BaseModel):
+    """
+    Request body for Agenda vs Discussion Intelligence.
+    Compares planned agenda vs actual discussion (actual meeting time is user input).
+    """
+    transcript: str
+    agenda_items: List[AgendaItem]
+    actual_meeting_minutes: int
+    model: Optional[str] = None
+
+
+class MeetingIntelligenceRequest(BaseModel):
+    """
+    Request body for Meeting Intelligence & Insights.
+    Higher-level analytics: talk-time, sentiment/tension, decisions, blockers, dominant topics.
+    """
+    transcript: str
+    segments: Optional[List[Dict]] = None  # Optional: [{start, end, text, speaker?}]
+    model: Optional[str] = None
+
 
 class AIToggleRequest(BaseModel):
     enabled: bool
@@ -1290,4 +1320,67 @@ async def meeting_ask(
         raise HTTPException(
             status_code=500,
             detail=f"Meeting Q&A failed: {str(e)}",
+        ) from e
+
+
+@router.post("/meeting/agenda-intelligence")
+async def meeting_agenda_intelligence(
+    request: AgendaIntelligenceRequest,
+) -> JSONResponse:
+    """
+    Agenda vs Discussion Intelligence: compare planned agenda vs actual discussion.
+
+    Allocates user-provided actual_meeting_minutes across agenda items and off-agenda
+    topics, then returns overrun/underrun/missed insights.
+
+    Request: transcript, agenda_items (list of {title, planned_minutes}), actual_meeting_minutes.
+    Returns: agenda_items (with actual_minutes, status), off_agenda_topics, insights.
+    """
+    if not request.transcript or not request.transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcription text is required.")
+    if not request.agenda_items:
+        raise HTTPException(status_code=400, detail="At least one agenda item is required.")
+    if request.actual_meeting_minutes <= 0:
+        raise HTTPException(status_code=400, detail="Actual meeting minutes must be greater than 0.")
+
+    try:
+        agenda_dicts = [{"title": item.title, "planned_minutes": item.planned_minutes} for item in request.agenda_items]
+        result = analyze_agenda_vs_discussion(
+            transcript=request.transcript,
+            agenda_items=agenda_dicts,
+            actual_meeting_minutes=request.actual_meeting_minutes,
+            model=request.model,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Agenda intelligence failed: {str(e)}",
+        ) from e
+
+
+@router.post("/meeting/intelligence-insights")
+async def meeting_intelligence_insights(
+    request: MeetingIntelligenceRequest,
+) -> JSONResponse:
+    """
+    Meeting Intelligence & Insights: higher-level analytics across people, topics, time, and outcomes.
+
+    Produces: talk-time per participant, sentiment & tension detection, decision velocity,
+    blockers/risks mentioned, dominant topics, and human-readable insight bullets.
+    """
+    if not request.transcript or not request.transcript.strip():
+        raise HTTPException(status_code=400, detail="Transcription text is required.")
+
+    try:
+        result = generate_meeting_intelligence(
+            transcript=request.transcript,
+            segments=request.segments,
+            model=request.model,
+        )
+        return JSONResponse(content=result)
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=500,
+            detail=f"Meeting intelligence failed: {str(e)}",
         ) from e
