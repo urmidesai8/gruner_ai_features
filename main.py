@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from app.api.endpoints import features, websocket
+from app.api.endpoints import chat, memory, documents, audio, meeting, websocket, assistant
 
 
 def _connection_aware_exception_handler(loop, context):
@@ -33,7 +33,12 @@ app.add_middleware(
 )
 
 # API Routers
-app.include_router(features.router, prefix="/api/features", tags=["features"])
+app.include_router(chat.router, prefix="/api/features", tags=["Chat"])
+app.include_router(memory.router, prefix="/api/features", tags=["Memory"])
+app.include_router(documents.router, prefix="/api/features", tags=["Documents"])
+app.include_router(audio.router, prefix="/api/features", tags=["Audio"])
+app.include_router(meeting.router, prefix="/api/features", tags=["Meeting"])
+app.include_router(assistant.router, prefix="/api/features", tags=["Assistant"])
 app.include_router(websocket.router, tags=["websocket"])
 
 # Mount Static Files

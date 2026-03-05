@@ -385,6 +385,122 @@
             background: #1976D2;
         }
 
+        /* Floating Assistant Widget */
+        .assistant-fab {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background-color: #6200ea;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            cursor: pointer;
+            z-index: 1100;
+        }
+
+        .assistant-fab:hover {
+            background-color: #3700b3;
+        }
+
+        .assistant-widget {
+            position: fixed;
+            bottom: 96px;
+            right: 24px;
+            width: 320px;
+            max-height: 480px;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            z-index: 1100;
+            display: none;
+        }
+
+        .assistant-header {
+            padding: 10px 12px;
+            background: #6200ea;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .assistant-header-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .assistant-header-close {
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+
+        .assistant-messages {
+            padding: 10px;
+            flex: 1;
+            overflow-y: auto;
+            background: #f7f7fb;
+        }
+
+        .assistant-message {
+            margin-bottom: 8px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            max-width: 90%;
+            word-wrap: break-word;
+        }
+
+        .assistant-message.user {
+            margin-left: auto;
+            background: #e3f2fd;
+        }
+
+        .assistant-message.assistant {
+            margin-right: auto;
+            background: #ede7f6;
+        }
+
+        .assistant-input-area {
+            padding: 8px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 6px;
+            background: #fafafa;
+        }
+
+        .assistant-input-area textarea {
+            flex: 1;
+            padding: 6px 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            font-size: 0.85rem;
+            resize: none;
+            min-height: 40px;
+            max-height: 120px;
+        }
+
+        .assistant-send-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: #6200ea;
+            color: #fff;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        .assistant-send-btn:hover {
+            background: #3700b3;
+        }
+
         .btn-icon {
             background: #fff;
             border: 1px solid #ddd;
@@ -757,6 +873,27 @@
             <button class="send-btn btn-user2" onclick="sendUser2()">
                 << Send</button>
                     <div id="status2" style="font-size:0.8em; color:gray; text-align:center;">Disconnected</div>
+        </div>
+    </div>
+
+    <!-- Floating AI Assistant -->
+    <div id="assistantFab" class="assistant-fab" title="Ask AI Assistant">
+        <span class="material-icons-outlined">smart_toy</span>
+    </div>
+
+    <div id="assistantWidget" class="assistant-widget">
+        <div class="assistant-header">
+            <div class="assistant-header-title">AI Assistant</div>
+            <div id="assistantClose" class="assistant-header-close">&times;</div>
+        </div>
+        <div id="assistantMessages" class="assistant-messages">
+            <div class="assistant-message assistant">
+                Hi! I can summarize text, draft responses, or translate text. Ask me anything.
+            </div>
+        </div>
+        <div class="assistant-input-area">
+            <textarea id="assistantInput" placeholder="Type your question..."></textarea>
+            <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
     </div>
 
@@ -2618,6 +2755,62 @@
             const lang = document.getElementById('user2Language');
             if (aiEnabled && lang && lang.value) {
                 retranslateMessagesForUser('user1', 'user2');
+            }
+        });
+
+        // --- Floating AI Assistant (Strands-based) ---
+        const assistantFab = document.getElementById('assistantFab');
+        const assistantWidget = document.getElementById('assistantWidget');
+        const assistantClose = document.getElementById('assistantClose');
+        const assistantMessages = document.getElementById('assistantMessages');
+        const assistantInput = document.getElementById('assistantInput');
+        const assistantSend = document.getElementById('assistantSend');
+
+        function toggleAssistant(open) {
+            const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
+            assistantWidget.style.display = shouldOpen ? 'flex' : 'none';
+        }
+
+        function appendAssistantMessage(role, text) {
+            const div = document.createElement('div');
+            div.className = `assistant-message ${role}`;
+            div.textContent = text;
+            assistantMessages.appendChild(div);
+            assistantMessages.scrollTop = assistantMessages.scrollHeight;
+        }
+
+        async function sendAssistantMessage() {
+            const text = assistantInput.value.trim();
+            if (!text) return;
+
+            appendAssistantMessage('user', text);
+            assistantInput.value = '';
+
+            appendAssistantMessage('assistant', 'Thinking...');
+            const thinkingNode = assistantMessages.lastChild;
+
+            try {
+                const response = await fetch('/api/features/assistant', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text })
+                });
+
+                const data = await response.json();
+                let reply = data && data.reply ? data.reply : 'Sorry, something went wrong.';
+                thinkingNode.textContent = reply;
+            } catch (error) {
+                thinkingNode.textContent = `Error: ${error.message}`;
+            }
+        }
+
+        assistantFab.addEventListener('click', () => toggleAssistant());
+        assistantClose.addEventListener('click', () => toggleAssistant(false));
+        assistantSend.addEventListener('click', sendAssistantMessage);
+        assistantInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendAssistantMessage();
             }
         });
 

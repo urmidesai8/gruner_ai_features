@@ -25,5 +25,6 @@ class Settings:
     REDIS_PASSWORD: str = os.getenv("REDIS_PASSWORD", "")
     REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
     REDIS_DECODE_RESPONSES: bool = True
+    API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8001")
 
 settings = Settings()

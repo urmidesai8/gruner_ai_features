@@ -31,6 +31,12 @@ class SmartRepliesRequest(BaseModel):
     tone: str = "auto"
     model: Optional[str] = None
 
+
+class DraftResponseRequest(BaseModel):
+    """Request model for draft response rewriting (grammar + tone)."""
+    message: str
+    tone: str
+
 class TranslationRequest(BaseModel):
     """Request model for language translation"""
     id: str

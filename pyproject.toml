@@ -22,4 +22,5 @@ dependencies = [
     "docx2txt>=0.9",
     "docling>=2.75.0",
     "redis>=7.2.0",
+    "strands-agents[openai]==1.29.0",
 ]
