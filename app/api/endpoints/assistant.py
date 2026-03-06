@@ -11,7 +11,7 @@ from typing import Any, List, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from strands import Agent, tool
@@ -268,8 +268,8 @@ class AssistantResponse(BaseModel):
     session_id: str
 
 
-@router.post("/assistant", response_model=AssistantResponse)
-async def run_assistant(request: AssistantRequest) -> JSONResponse:
+@router.post("/assistant/stream", response_class=StreamingResponse)
+async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
     """
     Run the Strands-based AI assistant with session memory.
 
@@ -281,39 +281,35 @@ async def run_assistant(request: AssistantRequest) -> JSONResponse:
     if not message:
         raise HTTPException(status_code=400, detail="Message is required.")
 
-    if len(message) > settings.ASSISTANT_MAX_MESSAGE_LENGTH:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Message exceeds maximum length of {settings.ASSISTANT_MAX_MESSAGE_LENGTH} characters.",
-        )
+    async def event_generator():
+        try:
+            # Let the UI know the connection is established and the agent is routing tools
+            yield f"event: status\ndata: {json.dumps({'status': 'agent_started'})}\n\n"
+            
+            # Strands natively supports async generator streaming
+            async for chunk in assistant_agent.stream_async(message):
+                # Filter out Strands internal loop events: Only yield actual generated tokens
+                if "data" in chunk and "delta" in chunk and isinstance(chunk["data"], str):
+                    yield f"data: {json.dumps({'content': chunk['data']})}\n\n"
+                elif "result" in chunk:
+                    # AgentResult object at the end of the stream
+                    pass
+                
+                # Small yield to the event loop ensures chunks flush immediately to the browser
+                await asyncio.sleep(0.005)
 
-    session_id = (request.session_id or "").strip() or str(uuid.uuid4())
-    history = get_session_messages(session_id)
-    prompt = build_context_from_history(history, message)
+            # Signal safe closure to the UI
+            yield f"event: end\ndata: {json.dumps({'status': 'finished'})}\n\n"
+            
+        except Exception as e:
+            # Send errors directly over the stream so the UI can gracefully catch them natively
+            yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
-    executor = _get_executor()
-    loop = asyncio.get_event_loop()
-    try:
-        result = await loop.run_in_executor(
-            executor,
-            lambda: assistant_agent(prompt),
-        )
-        reply = str(result).strip()
-    except Exception as e:
-        logger.exception("Assistant agent run failed")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Assistant failed: {str(e)}",
-        ) from e
-
-    append_session_messages(
-        session_id,
-        [
-            {"role": "user", "content": message},
-            {"role": "assistant", "content": reply},
-        ],
-    )
-
-    return JSONResponse(
-        content=AssistantResponse(reply=reply, session_id=session_id).model_dump(),
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+        }
     )
