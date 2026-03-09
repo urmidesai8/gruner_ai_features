@@ -11,7 +11,7 @@ from typing import Any, List, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from strands import Agent, tool
@@ -271,38 +271,53 @@ class AssistantResponse(BaseModel):
 @router.post("/assistant/stream", response_class=StreamingResponse)
 async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
     """
-    Run the Strands-based AI assistant with session memory.
+    Stream the Strands-based AI assistant with the same session memory as POST /assistant.
 
     - If `session_id` is provided, previous turns are used as context.
-    - If omitted, a new session is created and returned in the response for subsequent requests.
-    - Tools: summarization, draft-response, translation (invoked by the agent as needed).
+    - If omitted, a new session is created; session_id is sent in the first and final SSE events.
+    - After the stream completes, user message and full reply are persisted to the session store.
     """
     message = (request.message or "").strip()
     if not message:
         raise HTTPException(status_code=400, detail="Message is required.")
+    if len(message) > settings.ASSISTANT_MAX_MESSAGE_LENGTH:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Message exceeds maximum length of {settings.ASSISTANT_MAX_MESSAGE_LENGTH} characters.",
+        )
+
+    session_id = (request.session_id or "").strip() or str(uuid.uuid4())
+    history = get_session_messages(session_id)
+    prompt = build_context_from_history(history, message)
 
     async def event_generator():
+        full_reply_parts: List[str] = []
         try:
-            # Let the UI know the connection is established and the agent is routing tools
-            yield f"event: status\ndata: {json.dumps({'status': 'agent_started'})}\n\n"
-            
-            # Strands natively supports async generator streaming
-            async for chunk in assistant_agent.stream_async(message):
-                # Filter out Strands internal loop events: Only yield actual generated tokens
+            # Send session_id immediately so the client can store it for follow-ups
+            yield f"event: status\ndata: {json.dumps({'status': 'agent_started', 'session_id': session_id})}\n\n"
+
+            async for chunk in assistant_agent.stream_async(prompt):
                 if "data" in chunk and "delta" in chunk and isinstance(chunk["data"], str):
-                    yield f"data: {json.dumps({'content': chunk['data']})}\n\n"
+                    token = chunk["data"]
+                    full_reply_parts.append(token)
+                    yield f"data: {json.dumps({'content': token})}\n\n"
                 elif "result" in chunk:
-                    # AgentResult object at the end of the stream
                     pass
-                
-                # Small yield to the event loop ensures chunks flush immediately to the browser
+
                 await asyncio.sleep(0.005)
 
-            # Signal safe closure to the UI
-            yield f"event: end\ndata: {json.dumps({'status': 'finished'})}\n\n"
-            
+            full_reply = "".join(full_reply_parts).strip()
+            append_session_messages(
+                session_id,
+                [
+                    {"role": "user", "content": message},
+                    {"role": "assistant", "content": full_reply or "(no output)"},
+                ],
+            )
+            yield f"event: end\ndata: {json.dumps({'status': 'finished', 'session_id': session_id})}\n\n"
+
         except Exception as e:
-            # Send errors directly over the stream so the UI can gracefully catch them natively
+            logger.exception("Assistant stream failed")
             yield f"event: error\ndata: {json.dumps({'detail': str(e)})}\n\n"
 
     return StreamingResponse(
@@ -310,6 +325,6 @@ async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive"
-        }
+            "Connection": "keep-alive",
+        },
     )
