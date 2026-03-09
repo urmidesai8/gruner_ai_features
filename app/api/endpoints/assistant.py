@@ -1,8 +1,10 @@
 """
 AI Assistant endpoint: Strands-based agent with summarize / draft-response / translate tools.
 Includes session/memory management (Redis with in-memory fallback) and production-ready setup.
+Supports text and live-audio input (transcribe then run agent).
 """
 import asyncio
+import io
 import json
 import logging
 import threading
@@ -10,14 +12,15 @@ import uuid
 from typing import Any, List, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from strands import Agent, tool
 from strands.models.openai import OpenAIModel
 
 from app.core.config import settings
+from app.services.ai_service import transcribe_audio
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +170,6 @@ def draft_response_tool(message: str, tone: str = "auto") -> dict:
 def translate_text_tool(
     text: str,
     target_language: str,
-    model: Optional[str] = None,
 ) -> dict:
     """
     Translate text by calling the backend /translate-text endpoint.
@@ -183,7 +185,6 @@ def translate_text_tool(
             json={
                 "text": text,
                 "target_language": target_language,
-                "model": model,
             },
             timeout=60.0,
         )
@@ -326,5 +327,81 @@ async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
+        },
+    )
+
+
+@router.post("/assistant/audio")
+async def assistant_audio(
+    file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
+    session_id: Optional[str] = Form(None),
+) -> JSONResponse:
+    """
+    Accept live audio from the user: transcribe with Groq Whisper, then run the assistant
+    with the same session memory as text endpoints. Returns reply, session_id, and transcription.
+    """
+    if not file.filename and not getattr(file, "content_type", ""):
+        raise HTTPException(status_code=400, detail="Audio file is required.")
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read audio: {e}") from e
+
+    if not content or len(content) < 100:
+        raise HTTPException(status_code=400, detail="Audio data too short or empty.")
+
+    filename = file.filename or "audio.webm"
+    buf = io.BytesIO(content)
+    buf.name = filename
+
+    loop = asyncio.get_event_loop()
+    try:
+        transcription = await loop.run_in_executor(
+            None,
+            lambda: transcribe_audio((filename, buf)),
+        )
+    except Exception as e:
+        logger.exception("Transcription failed for assistant audio")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}") from e
+
+    if not transcription or (isinstance(transcription, str) and transcription.strip().lower().startswith("error")):
+        raise HTTPException(
+            status_code=400,
+            detail=transcription or "Transcription returned no text.",
+        )
+
+    message = transcription.strip()
+    if len(message) > settings.ASSISTANT_MAX_MESSAGE_LENGTH:
+        message = message[: settings.ASSISTANT_MAX_MESSAGE_LENGTH]
+
+    sid = (session_id or "").strip() or str(uuid.uuid4())
+    history = get_session_messages(sid)
+    prompt = build_context_from_history(history, message)
+
+    executor = _get_executor()
+    try:
+        reply = await loop.run_in_executor(
+            executor,
+            lambda: assistant_agent(prompt),
+        )
+        reply_text = str(reply).strip()
+    except Exception as e:
+        logger.exception("Assistant agent run failed (audio)")
+        raise HTTPException(status_code=500, detail=f"Assistant failed: {e}") from e
+
+    append_session_messages(
+        sid,
+        [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply_text or "(no output)"},
+        ],
+    )
+
+    return JSONResponse(
+        content={
+            "reply": reply_text,
+            "session_id": sid,
+            "transcription": message,
         },
     )

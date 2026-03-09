@@ -501,6 +501,30 @@
             background: #3700b3;
         }
 
+        .assistant-mic-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: #5c6bc0;
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+        }
+        .assistant-mic-btn:hover {
+            background: #3949ab;
+        }
+        .assistant-mic-btn.recording {
+            background: #c62828;
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
+        @keyframes assistant-pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
         .btn-icon {
             background: #fff;
             border: 1px solid #ddd;
@@ -935,6 +959,7 @@
         </div>
         <div class="assistant-input-area">
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
+            <button id="assistantMic" class="assistant-mic-btn" title="Hold to speak or click to start/stop">🎤</button>
             <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
     </div>
@@ -2800,14 +2825,18 @@
             }
         });
 
-        // --- Floating AI Assistant (Strands-based, with session memory) ---
+        // --- Floating AI Assistant (Strands-based, with session memory + voice) ---
         const assistantFab = document.getElementById('assistantFab');
         const assistantWidget = document.getElementById('assistantWidget');
         const assistantClose = document.getElementById('assistantClose');
         const assistantMessages = document.getElementById('assistantMessages');
         const assistantInput = document.getElementById('assistantInput');
         const assistantSend = document.getElementById('assistantSend');
+        const assistantMic = document.getElementById('assistantMic');
         let assistantSessionId = null;
+        let assistantMediaRecorder = null;
+        let assistantRecordingStream = null;
+        let assistantRecordingChunks = [];
 
         function toggleAssistant(open) {
             const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
@@ -2901,6 +2930,78 @@
                 }
             }
         }
+
+        async function startAssistantRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                assistantRecordingStream = stream;
+                assistantRecordingChunks = [];
+                const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+                assistantMediaRecorder = new MediaRecorder(stream);
+                assistantMediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) assistantRecordingChunks.push(e.data); };
+                assistantMediaRecorder.onstop = async () => {
+                    if (assistantRecordingStream) assistantRecordingStream.getTracks().forEach(t => t.stop());
+                    assistantRecordingStream = null;
+                    if (assistantRecordingChunks.length === 0) return;
+                    const blob = new Blob(assistantRecordingChunks, { type: mime });
+                    await sendAssistantAudio(blob);
+                };
+                assistantMediaRecorder.start(100);
+                assistantMic.classList.add('recording');
+                assistantMic.title = 'Click to stop and send';
+            } catch (err) {
+                console.error('Microphone access failed:', err);
+                appendAssistantMessage('assistant', 'Could not access microphone. Please allow audio and try again.');
+            }
+        }
+
+        function stopAssistantRecording() {
+            if (!assistantMediaRecorder || assistantMediaRecorder.state === 'inactive') return;
+            assistantMic.classList.remove('recording');
+            assistantMic.title = 'Hold to speak or click to start/stop';
+            assistantMediaRecorder.stop();
+            assistantMediaRecorder = null;
+        }
+
+        async function sendAssistantAudio(blob) {
+            appendAssistantMessage('user', '(Voice message – processing…)');
+            appendAssistantMessage('assistant', 'Transcribing and thinking…');
+            const thinkingNode = assistantMessages.lastChild;
+            try {
+                const form = new FormData();
+                form.append('file', blob, 'audio.webm');
+                if (assistantSessionId) form.append('session_id', assistantSessionId);
+                const response = await fetch('/api/features/assistant/audio', {
+                    method: 'POST',
+                    body: form
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    thinkingNode.textContent = data.detail || 'Request failed.';
+                    const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                    if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) userPlaceholder.remove();
+                    return;
+                }
+                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) {
+                    userPlaceholder.textContent = data.transcription || '(Voice)';
+                }
+                thinkingNode.textContent = data.reply || '(No response)';
+                if (data.session_id) assistantSessionId = data.session_id;
+            } catch (error) {
+                thinkingNode.textContent = 'Error: ' + error.message;
+                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) userPlaceholder.remove();
+            }
+        }
+
+        assistantMic.addEventListener('click', () => {
+            if (assistantMediaRecorder && assistantMediaRecorder.state === 'recording') {
+                stopAssistantRecording();
+            } else {
+                startAssistantRecording();
+            }
+        });
 
         assistantFab.addEventListener('click', () => toggleAssistant());
         assistantClose.addEventListener('click', () => toggleAssistant(false));
