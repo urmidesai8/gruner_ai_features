@@ -2758,13 +2758,14 @@
             }
         });
 
-        // --- Floating AI Assistant (Strands-based) ---
+        // --- Floating AI Assistant (Strands-based, with session memory) ---
         const assistantFab = document.getElementById('assistantFab');
         const assistantWidget = document.getElementById('assistantWidget');
         const assistantClose = document.getElementById('assistantClose');
         const assistantMessages = document.getElementById('assistantMessages');
         const assistantInput = document.getElementById('assistantInput');
         const assistantSend = document.getElementById('assistantSend');
+        let assistantSessionId = null;
 
         function toggleAssistant(open) {
             const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
@@ -2790,15 +2791,22 @@
             const thinkingNode = assistantMessages.lastChild;
 
             try {
+                const body = { message: text };
+                if (assistantSessionId) body.session_id = assistantSessionId;
                 const response = await fetch('/api/features/assistant', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: text })
+                    body: JSON.stringify(body)
                 });
 
                 const data = await response.json();
-                let reply = data && data.reply ? data.reply : 'Sorry, something went wrong.';
+                if (!response.ok) {
+                    thinkingNode.textContent = data.detail || 'Request failed.';
+                    return;
+                }
+                const reply = data && data.reply ? data.reply : 'Sorry, something went wrong.';
                 thinkingNode.textContent = reply;
+                if (data.session_id) assistantSessionId = data.session_id;
             } catch (error) {
                 thinkingNode.textContent = `Error: ${error.message}`;
             }

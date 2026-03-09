@@ -27,4 +27,18 @@ class Settings:
     REDIS_DECODE_RESPONSES: bool = True
     API_BASE_URL: str = os.getenv("API_BASE_URL", "http://localhost:8001")
 
+    # Assistant session / memory (production)
+    ASSISTANT_SESSION_TTL_SECONDS: int = int(
+        os.getenv("ASSISTANT_SESSION_TTL_SECONDS", "86400")
+    )  # 24h
+    ASSISTANT_MAX_HISTORY_MESSAGES: int = int(
+        os.getenv("ASSISTANT_MAX_HISTORY_MESSAGES", "40")
+    )  # last 20 user+assistant pairs
+    ASSISTANT_MAX_MESSAGE_LENGTH: int = int(
+        os.getenv("ASSISTANT_MAX_MESSAGE_LENGTH", "16384")
+    )
+    ASSISTANT_EXECUTOR_WORKERS: int = int(
+        os.getenv("ASSISTANT_EXECUTOR_WORKERS", "4")
+    )
+
 settings = Settings()
