@@ -41,4 +41,11 @@ class Settings:
         os.getenv("ASSISTANT_EXECUTOR_WORKERS", "4")
     )
 
+    # Postgres settings for assistant feedback
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
+    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "localhost")
+    POSTGRES_PORT: int = int(os.getenv("POSTGRES_PORT", "5432"))
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "gruner")
+
 settings = Settings()

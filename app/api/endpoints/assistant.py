@@ -1,7 +1,7 @@
 """
 AI Assistant endpoint: Strands-based agent with summarize / draft-response / translate tools.
 Includes session/memory management (Redis with in-memory fallback) and production-ready setup.
-Supports text and live-audio input (transcribe then run agent).
+Supports text and live-audio input (transcribe then run agent), plus feedback logging.
 """
 import asyncio
 import io
@@ -12,6 +12,7 @@ import uuid
 from typing import Any, List, Optional
 
 import httpx
+import psycopg2
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
@@ -51,6 +52,50 @@ except Exception as e:
 _ASSISTANT_KEY_PREFIX = "assistant:session:"
 _IN_MEMORY_SESSIONS: dict[str, List[dict[str, str]]] = {}
 _IN_MEMORY_LOCK = threading.Lock()
+
+
+# ---------------------------------------------------------------------------
+# Postgres feedback storage (simple connection per request)
+# ---------------------------------------------------------------------------
+
+
+def _get_feedback_connection():
+    if not settings.POSTGRES_DB or not settings.POSTGRES_USER:
+        raise RuntimeError("Postgres settings for assistant feedback are not configured.")
+    return psycopg2.connect(
+        dbname=settings.POSTGRES_DB,
+        user=settings.POSTGRES_USER,
+        password=settings.POSTGRES_PASSWORD,
+        host=settings.POSTGRES_HOST,
+        port=settings.POSTGRES_PORT,
+    )
+
+
+def save_assistant_feedback(feedback_message: str, feedback: str) -> None:
+    """
+    Persist assistant feedback to Postgres.
+    On failure, logs and returns without raising to the client.
+    """
+    feedback = (feedback or "").strip().lower()
+    if feedback not in {"positive", "negative"}:
+        logger.warning("Ignoring invalid feedback value: %s", feedback)
+        return
+
+    try:
+        conn = _get_feedback_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO feedback_assistant (feedback_id, feedback_message, feedback, created_at)
+            VALUES (%s, %s, %s, NOW())
+            """,
+            (str(uuid.uuid4()), feedback_message, feedback),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.exception("Failed to save assistant feedback: %s", e)
 
 
 def _session_key(session_id: str) -> str:
@@ -274,6 +319,11 @@ class AssistantResponse(BaseModel):
     session_id: str
 
 
+class AssistantFeedbackRequest(BaseModel):
+    message: str = Field(..., min_length=1)
+    feedback: str = Field(..., description="One of: positive, negative")
+
+
 @router.post("/assistant/stream", response_class=StreamingResponse)
 async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
     """
@@ -334,6 +384,32 @@ async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
             "Connection": "keep-alive",
         },
     )
+
+
+@router.post("/assistant/feedback")
+async def assistant_feedback(request: AssistantFeedbackRequest) -> JSONResponse:
+    """
+    Capture explicit user feedback (thumbs-up / thumbs-down) on an assistant reply.
+
+    - feedback: 'positive' or 'negative'
+    - message: the assistant's reply text the user reacted to
+    """
+    message = (request.message or "").strip()
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required.")
+
+    feedback = (request.feedback or "").strip().lower()
+    if feedback not in {"positive", "negative"}:
+        raise HTTPException(
+            status_code=400,
+            detail="feedback must be 'positive' or 'negative'.",
+        )
+
+    loop = asyncio.get_event_loop()
+    # Run DB insert in a thread to avoid blocking the event loop
+    await loop.run_in_executor(None, lambda: save_assistant_feedback(message, feedback))
+
+    return JSONResponse(content={"status": "ok"})
 
 
 @router.post("/assistant/audio")

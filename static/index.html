@@ -501,6 +501,28 @@
             background: #3700b3;
         }
 
+        .assistant-feedback {
+            margin-top: 4px;
+            font-size: 0.75rem;
+            display: flex;
+            gap: 6px;
+            align-items: center;
+            opacity: 0.85;
+        }
+
+        .assistant-feedback button {
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            padding: 0 2px;
+            font-size: 0.9rem;
+        }
+
+        .assistant-feedback button:disabled {
+            cursor: default;
+            opacity: 0.5;
+        }
+
         .assistant-mic-btn {
             padding: 6px 10px;
             border-radius: 6px;
@@ -1085,7 +1107,8 @@
                 { value: 'sentence-transformers/all-mpnet-base-v2', text: 'MPNet Base V2 (Embeddings) - Default' },
                 { value: 'distilbert-base-uncased-finetuned-sst-2-english', text: 'DistilBERT SST-2 (Sentiment)' },
                 { value: 'cross-encoder/ms-marco-bert-base-dot-prod', text: 'MS MARCO BERT (Ranking)' },
-                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
+                { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' },
+                { value: 'llama-3.3-70b-versatile', text: 'Llama 3.3 70B (Groq Cloud)' }
             ],
             'moderate': [
                 { value: 'facebook/roberta-base-openai-detector', text: 'RoBERTa OpenAI Detector (FaceBook) - Default' },
@@ -1746,6 +1769,11 @@
                         messages: messagesPayload,
                         model: model
                     };
+                    if (feature === 'prioritize') {
+                        // For Llama models, use smart-tag; for other OSS models, use /prioritize
+                        const isLlama = model && model.startsWith('llama-3');
+                        url = isLlama ? '/api/features/smart-tag' : '/api/features/prioritize';
+                    }
                 } else {
                     // Fallback (shouldn't happen with current features)
                     requestBody = messagesPayload;
@@ -1788,24 +1816,35 @@
         }
 
         function applyPriorities(data) {
-            // data format: { "msg_id": "High", ... }
+            // data format (smart-tag): { "msg_id": { tag: string, confidence: number }, ... }
             let appliedCount = 0;
             chatMessages.forEach(msg => {
-                const priority = data[msg.id];
-                if (priority) {
+                const entry = data[msg.id];
+                if (entry && entry.tag) {
+                    const tag = (entry.tag || '').toLowerCase();
+                    let priorityLabel = 'Normal';
+                    if (tag === 'urgent') priorityLabel = 'Urgent';
+                    else if (tag === 'important' || tag === 'action_required') priorityLabel = 'High';
+                    else if (tag === 'information') priorityLabel = 'Normal';
+
                     const tagContainer = msg.element.querySelector('.ai-tags');
                     // distinct removal
                     const oldTags = tagContainer.querySelectorAll('.tag-priority');
                     oldTags.forEach(e => e.remove());
 
                     let className = 'tag-normal';
-                    if (priority.toLowerCase() === 'urgent') className = 'tag-urgent';
-                    if (priority.toLowerCase() === 'high') className = 'tag-high';
+                    if (priorityLabel.toLowerCase() === 'urgent') className = 'tag-urgent';
+                    if (priorityLabel.toLowerCase() === 'high') className = 'tag-high';
 
                     // Always show the tag for clarity now
                     const span = document.createElement('span');
                     span.className = `tag ${className} tag-priority`;
-                    span.textContent = priority;
+                    span.textContent = priorityLabel;
+                    if (entry.confidence !== undefined) {
+                        span.title = `Tag: ${tag} · Confidence: ${entry.confidence}`;
+                    } else {
+                        span.title = `Tag: ${tag}`;
+                    }
                     tagContainer.appendChild(span);
                     appliedCount++;
                 }
@@ -2849,6 +2888,7 @@
             div.textContent = text;
             assistantMessages.appendChild(div);
             assistantMessages.scrollTop = assistantMessages.scrollHeight;
+            return div;
         }
 
         async function sendAssistantMessage() {
@@ -2858,8 +2898,7 @@
             appendAssistantMessage('user', text);
             assistantInput.value = '';
 
-            appendAssistantMessage('assistant', 'Thinking...');
-            const thinkingNode = assistantMessages.lastChild;
+            const thinkingNode = appendAssistantMessage('assistant', 'Thinking...');
 
             try {
                 const body = { message: text };
@@ -2922,6 +2961,10 @@
                         }
                     }
                 }
+
+                if (assistantReply) {
+                    attachAssistantFeedback(thinkingNode, assistantReply);
+                }
             } catch (error) {
                 if (thinkingNode.textContent === 'Thinking...') {
                     thinkingNode.textContent = `Error: ${error.message}`;
@@ -2965,8 +3008,7 @@
 
         async function sendAssistantAudio(blob) {
             appendAssistantMessage('user', '(Voice message – processing…)');
-            appendAssistantMessage('assistant', 'Transcribing and thinking…');
-            const thinkingNode = assistantMessages.lastChild;
+            const thinkingNode = appendAssistantMessage('assistant', 'Transcribing and thinking…');
             try {
                 const form = new FormData();
                 form.append('file', blob, 'audio.webm');
@@ -2986,13 +3028,59 @@
                 if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) {
                     userPlaceholder.textContent = data.transcription || '(Voice)';
                 }
-                thinkingNode.textContent = data.reply || '(No response)';
+                const replyText = data.reply || '(No response)';
+                thinkingNode.textContent = replyText;
                 if (data.session_id) assistantSessionId = data.session_id;
+                attachAssistantFeedback(thinkingNode, replyText);
             } catch (error) {
                 thinkingNode.textContent = 'Error: ' + error.message;
                 const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
                 if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) userPlaceholder.remove();
             }
+        }
+
+        function attachAssistantFeedback(node, replyText) {
+            if (!node || !replyText || node.dataset.feedbackAttached === 'true') return;
+            node.dataset.feedbackAttached = 'true';
+
+            const container = document.createElement('div');
+            container.className = 'assistant-feedback';
+
+            const label = document.createElement('span');
+            label.textContent = 'Feedback:';
+
+            const upBtn = document.createElement('button');
+            upBtn.type = 'button';
+            upBtn.textContent = '👍';
+            upBtn.title = 'Helpful';
+
+            const downBtn = document.createElement('button');
+            downBtn.type = 'button';
+            downBtn.textContent = '👎';
+            downBtn.title = 'Not helpful';
+
+            async function sendFeedback(feedback) {
+                upBtn.disabled = true;
+                downBtn.disabled = true;
+                try {
+                    await fetch('/api/features/assistant/feedback', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message: replyText, feedback })
+                    });
+                } catch (e) {
+                    console.warn('Failed to send assistant feedback', e);
+                }
+            }
+
+            upBtn.addEventListener('click', () => sendFeedback('positive'));
+            downBtn.addEventListener('click', () => sendFeedback('negative'));
+
+            container.appendChild(label);
+            container.appendChild(upBtn);
+            container.appendChild(downBtn);
+
+            node.appendChild(container);
         }
 
         assistantMic.addEventListener('click', () => {

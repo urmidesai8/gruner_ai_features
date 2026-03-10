@@ -70,19 +70,38 @@ async def toggle_ai(request: AIToggleRequest) -> JSONResponse:
 
 @router.post("/prioritize")
 async def prioritize_messages(request: AIAnalysisRequest) -> JSONResponse:
-    """Classify priority for a list of messages."""
+    """
+    Classify priority for a list of messages using model-specific behavior.
+
+    - For Llama models (model name starts with "llama-3"): callers should prefer /smart-tag.
+      This endpoint is primarily for open-source transformer models (MPNet, DistilBERT, etc.).
+    - For non-Llama models with a local identifier (contains "/" and not "openai"), use
+      analyze_prioritization_local.
+    - Otherwise fall back to Groq Llama-based JSON classification.
+    """
     if not chat_history.get_ai_enabled():
-        raise HTTPException(status_code=403, detail="AI features are currently disabled. Please enable AI to use this feature.")
+        raise HTTPException(
+            status_code=403,
+            detail="AI features are currently disabled. Please enable AI to use this feature.",
+        )
     if not request.messages:
         return JSONResponse(content={})
+
     ai_enabled_messages = chat_history.get_ai_enabled_messages()
     ai_enabled_ids = {msg["message_id"] for msg in ai_enabled_messages}
     filtered_messages = [m for m in request.messages if m.id in ai_enabled_ids]
     if not filtered_messages:
         return JSONResponse(content={})
-    if request.model and "/" in request.model and "openai" not in request.model:
-        results = analyze_prioritization_local(filtered_messages, request.model)
+
+    model_name = (request.model or "").strip() if hasattr(request, "model") else ""
+
+    # If this is a non-Llama open-source / local model, delegate to local feature service
+    if model_name and "/" in model_name and "openai" not in model_name and not model_name.startswith("llama-3"):
+        results = analyze_prioritization_local(filtered_messages, model_name)
+        # Expected shape from local implementation: { id: "Low"|"Normal"|"High"|"Urgent", ... }
         return JSONResponse(content=results)
+
+    # Default Groq-based JSON classification (kept for backward compatibility)
     prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     prompt = f"""Analyze the priority of the following messages.
@@ -91,13 +110,137 @@ Messages:
 {prompt_text}
 Return ONLY valid JSON."""
     try:
-        response_text = call_groq_ai(prompt, model_name=request.model)
+        response_text = call_groq_ai(prompt, model_name=model_name or None)
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
     except Exception:
         results = {m.id: "Normal" for m in filtered_messages}
     return JSONResponse(content=results)
+
+
+@router.post("/smart-tag")
+async def smart_tag_messages(request: AIAnalysisRequest) -> JSONResponse:
+    """
+    Smart-tag a list of messages using the following tags:
+      - urgent: message includes deadlines/time pressure ('by 3pm', 'ASAP', 'urgent')
+      - important: message indicates priority but not an immediate deadline ('can you help with this?')
+      - information: message shares information relevant to the chat context
+      - action_required: message implies an action for the receiver
+
+    For each message, the model must pick exactly ONE best-fitting tag.
+
+    The response is a JSON object where keys are message IDs and values are
+    single objects like:
+      {
+        "tag": "action_required" | "urgent" | "important" | "information",
+        "confidence": 0.0-1.0
+      }
+    """
+    if not chat_history.get_ai_enabled():
+        raise HTTPException(
+            status_code=403,
+            detail="AI features are currently disabled. Please enable AI to use this feature.",
+        )
+
+    if not request.messages:
+        return JSONResponse(content={})
+
+    # Use all provided messages directly for smart tagging without additional filtering
+    filtered_messages = request.messages
+
+    primary_model = "llama-3.1-8b-instant"
+    fallback_model = "llama-3.3-70b-versatile"
+
+    prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
+    prompt_text = "\n".join(prompt_items)
+    system_prompt = (
+        "You are an assistant that classifies chat messages into tags.\n"
+        "For each message, you must assign EXACTLY ONE best-fitting tag from this set:\n"
+        "- urgent: if the message includes deadlines or time pressure ('by 3pm', 'ASAP', 'urgent').\n"
+        "- important: if the message indicates priority but not an immediate deadline ('can you help with this?', 'please prioritize this').\n"
+        "- information: if the message is primarily sharing information relevant to the context of the chat.\n"
+        "- action_required: if the message clearly implies an action for the receiver to take.\n"
+        "You must also provide a confidence score between 0.0 and 1.0 for the chosen tag.\n"
+        "Return ONLY valid JSON with this structure:\n"
+        "{\n"
+        '  "<id>": {"tag": "action_required", "confidence": 0.92},\n'
+        '  "<id2>": {"tag": "urgent", "confidence": 0.87}\n'
+        "  ... one entry per message id ...\n"
+        "}\n"
+        "Rules:\n"
+        "- Use only these tag values: 'action_required', 'urgent', 'important', 'information'.\n"
+        "- Do not invent new tag names.\n"
+        "- confidence must be a number between 0 and 1 (float).\n"
+        "- Do not include any extra explanation or keys outside this mapping.\n"
+    )
+
+    user_prompt = f"Messages:\n{prompt_text}"
+
+    def _call_model(model_name: str) -> dict:
+        response_text = call_groq_ai(
+            f"{system_prompt}\n\n{user_prompt}",
+            model_name=model_name,
+        )
+        if not response_text:
+            raise RuntimeError(f"Empty response from Groq model {model_name}")
+
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0]
+
+        response_text = response_text.strip()
+        if not response_text:
+            raise RuntimeError(f"Blank response from Groq model {model_name} after stripping")
+
+        parsed = json.loads(response_text)
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Groq model {model_name} returned non-dict JSON")
+
+        # Best-effort normalization: ensure structure is {id: {"tag": <str>, "confidence": <float>}}
+        normalized: dict[str, dict] = {}
+        for msg_id, value in parsed.items():
+            # Support both the ideal shape ({id: {...}}) and older list-based shape ({id: [{...}, ...]})
+            candidates: list[dict] = []
+            if isinstance(value, dict):
+                candidates = [value]
+            elif isinstance(value, list):
+                candidates = [item for item in value if isinstance(item, dict)]
+
+            best: dict | None = None
+            best_conf: float = -1.0
+
+            for item in candidates:
+                tag = str(item.get("tag", "")).lower().strip()
+                if tag not in {"action_required", "urgent", "important", "information"}:
+                    continue
+                confidence = item.get("confidence", 0.5)
+                try:
+                    conf_val = float(confidence)
+                except (TypeError, ValueError):
+                    conf_val = 0.5
+                # Clamp between 0 and 1 and round to 3 decimal places
+                conf_val = max(0.0, min(1.0, conf_val))
+                conf_val = round(conf_val, 3)
+
+                if conf_val > best_conf:
+                    best_conf = conf_val
+                    best = {"tag": tag, "confidence": conf_val}
+
+            if best is not None:
+                normalized[msg_id] = best
+        return normalized
+
+    for model_name in (primary_model, fallback_model):
+        try:
+            results = _call_model(model_name)
+            return JSONResponse(content=results)
+        except Exception as e:
+            print(f"Error in smart_tag with model {model_name}: {e}")
+            continue
+
+    # Absolute fallback: return empty tag objects for all filtered messages
+    fallback_results = {m.id: {} for m in filtered_messages}
+    return JSONResponse(content=fallback_results)
 
 
 @router.post("/moderate")
