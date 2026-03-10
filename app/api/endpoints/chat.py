@@ -98,16 +98,26 @@ async def prioritize_messages(request: AIAnalysisRequest) -> JSONResponse:
     # If this is a non-Llama open-source / local model, delegate to local feature service
     if model_name and "/" in model_name and "openai" not in model_name and not model_name.startswith("llama-3"):
         results = analyze_prioritization_local(filtered_messages, model_name)
-        # Expected shape from local implementation: { id: "Low"|"Normal"|"High"|"Urgent", ... }
+        # Expected shape from local implementation:
+        # { id: "Urgent"|"Important"|"Information"|"Action Required", ... }
         return JSONResponse(content=results)
 
-    # Default Groq-based JSON classification (kept for backward compatibility)
+    # Default Groq-based JSON classification (Groq Llama models)
     prompt_items = [f"ID: {m.id} | Msg: {m.message}" for m in filtered_messages]
     prompt_text = "\n".join(prompt_items)
     prompt = f"""Analyze the priority of the following messages.
-Return a JSON object where keys are IDs and values are one of: 'Low', 'Normal', 'High', 'Urgent'.
+You must classify each message into exactly ONE of these four statuses:
+- "Urgent": time-sensitive, has explicit deadlines or strong urgency (e.g., "ASAP", "by 3pm today").
+- "Important": high impact or priority but not strictly time-critical.
+- "Information": mainly sharing information or updates, no clear action needed.
+- "Action Required": clearly asks the recipient to do something, but not as time-critical as "Urgent".
+
+Return a JSON object where keys are IDs and values are one of:
+'Urgent', 'Important', 'Information', 'Action Required'.
+
 Messages:
 {prompt_text}
+
 Return ONLY valid JSON."""
     try:
         response_text = call_groq_ai(prompt, model_name=model_name or None)
@@ -115,7 +125,8 @@ Return ONLY valid JSON."""
             response_text = response_text.split("```json")[1].split("```")[0]
         results = json.loads(response_text)
     except Exception:
-        results = {m.id: "Normal" for m in filtered_messages}
+        # Fallback: default to neutral informational status
+        results = {m.id: "Information" for m in filtered_messages}
     return JSONResponse(content=results)
 
 

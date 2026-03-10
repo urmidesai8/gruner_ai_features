@@ -188,25 +188,31 @@ def analyze_prioritization_local(messages: list, model_id: str) -> dict:
     # But sticking to User's list:
     
     if "sst-2" in model_id:
-        # Sentiment analysis: Negative -> Urgent, Positive -> Normal
+        # Sentiment analysis: map sentiment to new priority statuses
         pipe = _get_pipeline("text-classification", model_id)
-        if not pipe: return {}
-        
+        if not pipe:
+            return {}
+
         for msg in messages:
             try:
                 out = pipe(msg.message, truncation=True, max_length=512)
                 label = out[0]['label'] # POSITIVE / NEGATIVE
-                # Map Negative -> High Priority (Complaint/Issue), Positive -> Low
-                priority = "High" if label == "NEGATIVE" else "Normal"
+                # Map:
+                # - NEGATIVE -> "Action Required" (likely complaint/issue needing attention)
+                # - POSITIVE -> "Information" (general informational/positive content)
+                if label == "NEGATIVE":
+                    priority = "Action Required"
+                else:
+                    priority = "Information"
                 results[msg.id] = priority
             except:
-                results[msg.id] = "Normal"
+                results[msg.id] = "Information"
                 
     else:
         # Default fallback or placeholder for embedding-based ranking
-        # For now, return "Normal" if we can't classify
+        # For now, return "Information" if we can't classify
         for msg in messages:
-             results[msg.id] = "Normal"
+             results[msg.id] = "Information"
 
     return results
 
