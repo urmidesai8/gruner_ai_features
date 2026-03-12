@@ -4,6 +4,7 @@ Includes session/memory management (Redis with in-memory fallback) and productio
 Supports text and live-audio input (transcribe then run agent), plus feedback logging.
 """
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -12,16 +13,20 @@ import uuid
 from typing import Any, List, Optional
 
 import httpx
+import numpy as np
 import psycopg2
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+import tempfile
+import os
 
 from strands import Agent, tool
 from strands.models.openai import OpenAIModel
 
 from app.core.config import settings
 from app.services.ai_service import transcribe_audio
+from app.services.nova_sonic_service import run_nova_sonic_on_pcm
 
 logger = logging.getLogger(__name__)
 
@@ -324,6 +329,16 @@ class AssistantFeedbackRequest(BaseModel):
     feedback: str = Field(..., description="One of: positive, negative")
 
 
+class NovaV2VResponse(BaseModel):
+    reply: str
+    audio_base64: str
+
+
+class NovaV2VPCMRequest(BaseModel):
+    pcm_base64: str
+    sample_rate: int = 16000
+
+
 @router.post("/assistant/stream", response_class=StreamingResponse)
 async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
     """
@@ -411,6 +426,144 @@ async def assistant_feedback(request: AssistantFeedbackRequest) -> JSONResponse:
 
     return JSONResponse(content={"status": "ok"})
 
+
+@router.post("/assistant/nova-v2v", response_model=NovaV2VResponse)
+async def assistant_nova_v2v(
+    file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
+) -> JSONResponse:
+    """
+    Voice-to-voice assistant interaction using Amazon Nova Sonic.
+
+    - Accepts an uploaded audio file from the client.
+    - Converts it to 16 kHz mono PCM.
+    - Sends audio to Nova Sonic using the bidirectional streaming API.
+    - Returns the assistant's reply text and synthesized audio as base64-encoded LPCM (24 kHz mono).
+    """
+    if not file.filename and not getattr(file, "content_type", ""):
+        raise HTTPException(status_code=400, detail="Audio file is required.")
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read audio: {e}") from e
+
+    if not content or len(content) < 100:
+        raise HTTPException(status_code=400, detail="Audio data too short or empty.")
+
+    buf = io.BytesIO(content)
+    buf.seek(0)
+
+    try:
+        import librosa  # type: ignore
+    except ImportError as e:  # pragma: no cover - environment dependent
+        raise HTTPException(
+            status_code=500,
+            detail=f"Missing dependency for audio decoding (librosa): {e}",
+        ) from e
+
+    try:
+        # Write to a temporary file with an appropriate extension so that
+        # librosa/audioread can detect the format (e.g. webm/opus).
+        suffix = ".webm"
+        if file.filename and "." in file.filename:
+            ext = file.filename.rsplit(".", 1)[-1].lower()
+            suffix = f".{ext}"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            audio, sr = librosa.load(tmp_path, sr=16000, mono=True)
+        finally:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+    except Exception as e:
+        msg = str(e)
+        logger.exception("Nova V2V audio decode failed: %s", msg)
+        # Common case on Windows: no backend (e.g. FFmpeg) for webm/opus.
+        hint = (
+            "Audio format not supported. Install FFmpeg and ensure it is on your system PATH, "
+            "or upload a WAV/MP3 file instead."
+        )
+        if "format not recognised" in msg.lower() or "no backend available" in msg.lower():
+            raise HTTPException(status_code=400, detail=hint) from e
+        raise HTTPException(status_code=400, detail=f"Failed to decode audio: {msg}") from e
+
+    if audio.size == 0:
+        raise HTTPException(status_code=400, detail="Decoded audio is empty.")
+
+    pcm_int16 = (np.clip(audio, -1.0, 1.0) * 32767).astype("int16")
+
+    try:
+        reply_text, audio_bytes = await run_nova_sonic_on_pcm(pcm_int16, input_rate=16000)
+    except Exception as e:
+        logger.exception("Nova Sonic V2V interaction failed")
+        raise HTTPException(status_code=500, detail=f"Nova Sonic failed: {e}") from e
+
+    if not audio_bytes:
+        logger.warning("Nova Sonic returned no audio output for file-based V2V request; returning text-only reply.")
+        audio_b64 = ""
+    else:
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+    return JSONResponse(
+        content={
+            "reply": reply_text or "",
+            "audio_base64": audio_b64,
+        }
+    )
+
+
+@router.post("/assistant/nova-v2v-pcm", response_model=NovaV2VResponse)
+async def assistant_nova_v2v_pcm(request: NovaV2VPCMRequest) -> JSONResponse:
+    """
+    Voice-to-voice assistant interaction using Amazon Nova Sonic, with raw PCM input.
+
+    The frontend decodes the recorded audio using Web Audio API, converts it to
+    16-bit PCM, and sends it base64-encoded. This avoids server-side format
+    decoding (no FFmpeg required).
+    """
+    pcm_b64 = (request.pcm_base64 or "").strip()
+    if not pcm_b64:
+        raise HTTPException(status_code=400, detail="pcm_base64 is required.")
+
+    try:
+        pcm_bytes = base64.b64decode(pcm_b64)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid base64 PCM data: {e}") from e
+
+    if not pcm_bytes:
+        raise HTTPException(status_code=400, detail="Decoded PCM data is empty.")
+
+    try:
+        pcm_samples = np.frombuffer(pcm_bytes, dtype=np.int16)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to parse PCM buffer: {e}") from e
+
+    if pcm_samples.size == 0:
+        raise HTTPException(status_code=400, detail="PCM buffer contains no samples.")
+
+    try:
+        reply_text, audio_bytes = await run_nova_sonic_on_pcm(
+            pcm_samples, input_rate=request.sample_rate or 16000
+        )
+    except Exception as e:
+        logger.exception("Nova Sonic V2V PCM interaction failed")
+        raise HTTPException(status_code=500, detail=f"Nova Sonic failed: {e}") from e
+
+    if not audio_bytes:
+        logger.warning("Nova Sonic returned no audio output for PCM V2V request; returning text-only reply.")
+        audio_b64 = ""
+    else:
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+
+    return JSONResponse(
+        content={
+            "reply": reply_text or "",
+            "audio_base64": audio_b64,
+        }
+    )
 
 @router.post("/assistant/audio")
 async def assistant_audio(

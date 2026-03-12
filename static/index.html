@@ -987,6 +987,7 @@
         <div class="assistant-input-area">
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
             <button id="assistantMic" class="assistant-mic-btn" title="Hold to speak or click to start/stop">🎤</button>
+            <button id="assistantNovaTest" class="assistant-mic-btn" title="Test Nova voice-to-voice (fixed short clip)">🔊</button>
             <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
     </div>
@@ -2880,6 +2881,7 @@
         const assistantInput = document.getElementById('assistantInput');
         const assistantSend = document.getElementById('assistantSend');
         const assistantMic = document.getElementById('assistantMic');
+        const assistantNovaTest = document.getElementById('assistantNovaTest');
         let assistantSessionId = null;
         let assistantMediaRecorder = null;
         let assistantRecordingStream = null;
@@ -3015,6 +3017,9 @@
         }
 
         async function sendAssistantAudio(blob) {
+            // By default, keep existing behavior: transcribe + Groq/Strands agent.
+            // To test Nova Sonic V2V end-to-end, switch the fetch call below to
+            // '/api/features/assistant/nova-v2v' and adjust the handling accordingly.
             appendAssistantMessage('user', '(Voice message – processing…)');
             const thinkingNode = appendAssistantMessage('assistant', 'Transcribing and thinking…');
             try {
@@ -3044,6 +3049,128 @@
                 thinkingNode.textContent = 'Error: ' + error.message;
                 const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
                 if (userPlaceholder && userPlaceholder.textContent.includes('(Voice message')) userPlaceholder.remove();
+            }
+        }
+
+        async function recordAndSendNovaV2V() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const chunks = [];
+                const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                    ? 'audio/webm;codecs=opus'
+                    : 'audio/webm';
+                const recorder = new MediaRecorder(stream, { mimeType: mime });
+                recorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) chunks.push(e.data);
+                };
+                recorder.onstop = async () => {
+                    stream.getTracks().forEach(t => t.stop());
+                    if (chunks.length === 0) return;
+                    const blob = new Blob(chunks, { type: mime });
+
+                    appendAssistantMessage('user', '(Nova V2V – processing…)');
+                    const thinkingNode = appendAssistantMessage('assistant', 'Talking to Nova Sonic…');
+                    try {
+                        const arrayBuffer = await blob.arrayBuffer();
+                        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                        const audioCtx = new AudioCtx();
+                        const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+                        const channelData = decoded.getChannelData(0); // mono
+                        const inputRate = decoded.sampleRate || 48000;
+                        const targetRate = 16000;
+
+                        // Naive resample to 16 kHz so Nova accepts the audio
+                        const ratio = targetRate / inputRate;
+                        const outLength = Math.max(1, Math.round(channelData.length * ratio));
+                        const resampled = new Float32Array(outLength);
+                        for (let i = 0; i < outLength; i++) {
+                            const srcIndex = i / ratio;
+                            const i0 = Math.floor(srcIndex);
+                            const i1 = Math.min(channelData.length - 1, i0 + 1);
+                            const t = srcIndex - i0;
+                            const s0 = channelData[i0] || 0;
+                            const s1 = channelData[i1] || 0;
+                            resampled[i] = s0 + (s1 - s0) * t;
+                        }
+
+                        // Convert Float32 [-1.0, 1.0] to Int16 PCM
+                        const pcmInt16 = new Int16Array(resampled.length);
+                        for (let i = 0; i < resampled.length; i++) {
+                            let v = resampled[i];
+                            if (v > 1.0) v = 1.0;
+                            else if (v < -1.0) v = -1.0;
+                            pcmInt16[i] = v < 0 ? v * 0x8000 : v * 0x7FFF;
+                        }
+
+                        // Base64‑encode PCM bytes
+                        const u8 = new Uint8Array(pcmInt16.buffer);
+                        let binary = "";
+                        for (let i = 0; i < u8.length; i++) {
+                            binary += String.fromCharCode(u8[i]);
+                        }
+                        const pcmBase64 = btoa(binary);
+
+                        const response = await fetch('/api/features/assistant/nova-v2v-pcm', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                pcm_base64: pcmBase64,
+                                sample_rate: targetRate
+                            })
+                        });
+                        const data = await response.json();
+                        if (!response.ok) {
+                            thinkingNode.textContent = data.detail || 'Nova V2V request failed.';
+                            return;
+                        }
+
+                        const replyText = data.reply || '(No response)';
+                        thinkingNode.textContent = replyText;
+
+                        // Play back Nova Sonic audio (raw 16‑bit PCM, 24 kHz mono)
+                        if (data.audio_base64) {
+                            try {
+                                const b64 = data.audio_base64;
+                                const binaryOut = atob(b64);
+                                const len = binaryOut.length;
+                                const pcmOut = new Int16Array(len / 2);
+                                for (let i = 0; i < len; i += 2) {
+                                    const lo = binaryOut.charCodeAt(i);
+                                    const hi = binaryOut.charCodeAt(i + 1);
+                                    let val = (hi << 8) | lo;
+                                    if (val & 0x8000) val = val - 0x10000;
+                                    pcmOut[i / 2] = val;
+                                }
+
+                                const outCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+                                const buffer = outCtx.createBuffer(1, pcmOut.length, 24000);
+                                const outChannel = buffer.getChannelData(0);
+                                for (let i = 0; i < pcmOut.length; i++) {
+                                    outChannel[i] = pcmOut[i] / 32768;
+                                }
+                                const source = outCtx.createBufferSource();
+                                source.buffer = buffer;
+                                source.connect(outCtx.destination);
+                                source.start();
+                            } catch (e) {
+                                console.error('Failed to play Nova Sonic audio:', e);
+                            }
+                        }
+                    } catch (error) {
+                        thinkingNode.textContent = 'Nova V2V error: ' + error.message;
+                    }
+                };
+                recorder.start();
+                assistantNovaTest.classList.add('recording');
+                assistantNovaTest.title = 'Recording… click again to stop Nova V2V test';
+                setTimeout(() => {
+                    recorder.stop();
+                    assistantNovaTest.classList.remove('recording');
+                    assistantNovaTest.title = 'Test Nova voice-to-voice (fixed short clip)';
+                }, 5000);
+            } catch (err) {
+                console.error('Nova V2V microphone access failed:', err);
+                appendAssistantMessage('assistant', 'Could not access microphone for Nova V2V. Please allow audio and try again.');
             }
         }
 
@@ -3097,6 +3224,10 @@
             } else {
                 startAssistantRecording();
             }
+        });
+
+        assistantNovaTest.addEventListener('click', () => {
+            recordAndSendNovaV2V();
         });
 
         assistantFab.addEventListener('click', () => toggleAssistant());
