@@ -7,6 +7,8 @@
     <title>AI Dual-User Chat Simulation</title>
     <!-- Material Icons -->
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Outlined" rel="stylesheet">
+    <!-- Socket.IO client for Nova Sonic voice -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -567,6 +569,36 @@
             background: #c62828;
             animation: assistant-pulse 1s ease-in-out infinite;
         }
+        .assistant-nova-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: linear-gradient(135deg, #ff6f00 0%, #ff9800 100%);
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: background 0.2s, box-shadow 0.2s;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .assistant-nova-btn:hover {
+            background: linear-gradient(135deg, #e65100 0%, #f57c00 100%);
+            box-shadow: 0 2px 8px rgba(255, 111, 0, 0.4);
+        }
+        .assistant-nova-btn.recording {
+            background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
+        .assistant-nova-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .assistant-nova-btn .material-icons-outlined {
+            font-size: 1rem;
+        }
         @keyframes assistant-pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
@@ -1008,6 +1040,10 @@
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
             <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
             <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 V2V</button>
+            <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
+                <span class="material-icons-outlined">record_voice_over</span>
+                <span>Nova</span>
+            </button>
             <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
     </div>
@@ -2901,6 +2937,7 @@
         const assistantInput = document.getElementById('assistantInput');
         const assistantSend = document.getElementById('assistantSend');
         const assistantMic = document.getElementById('assistantMic');
+        const assistantNovaBtn = document.getElementById('assistantNova');
         let assistantSessionId = null;
         let assistantMediaRecorder = null;
         let assistantRecordingStream = null;
@@ -2909,6 +2946,16 @@
         let assistantV2vRecordingStream = null;
         let assistantV2vRecordingChunks = [];
         let assistantV2vAudio = null;
+        // Nova Sonic voice (same server via Socket.IO)
+        let novaSocket = null;
+        let novaRecordingStream = null;
+        let novaAudioContext = null;
+        let novaScriptProcessor = null;
+        let novaSource = null;
+        let novaSessionActive = false;
+        let novaAudioQueue = [];
+        let novaAudioPlaying = false;
+        let novaPlaybackContext = null;
 
         function toggleAssistant(open) {
             const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
@@ -3202,6 +3249,174 @@
                     stopV2vRecording();
                 } else {
                     startV2vRecording();
+                }
+            });
+        }
+
+        // --- Nova Sonic live voice (Socket.IO to backend) ---
+        function novaBase64FromFloat32(float32Arr, sourceSampleRate, targetSampleRate) {
+            if (sourceSampleRate === targetSampleRate) {
+                const int16 = new Int16Array(float32Arr.length);
+                for (let i = 0; i < float32Arr.length; i++) {
+                    const s = Math.max(-1, Math.min(1, float32Arr[i]));
+                    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                return btoa(String.fromCharCode.apply(null, new Uint8Array(int16.buffer)));
+            }
+            const ratio = sourceSampleRate / targetSampleRate;
+            const outLen = Math.floor(float32Arr.length / ratio);
+            const out = new Int16Array(outLen);
+            for (let i = 0; i < outLen; i++) {
+                const j = i * ratio;
+                const j0 = Math.floor(j);
+                const j1 = Math.min(j0 + 1, float32Arr.length - 1);
+                const frac = j - j0;
+                const s = float32Arr[j0] * (1 - frac) + float32Arr[j1] * frac;
+                const clamped = Math.max(-1, Math.min(1, s));
+                out[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+            }
+            return btoa(String.fromCharCode.apply(null, new Uint8Array(out.buffer)));
+        }
+
+        async function startNovaVoice() {
+            if (novaSessionActive) return;
+            const btn = assistantNovaBtn;
+            if (!btn) return;
+            btn.disabled = true;
+            btn.classList.add('recording');
+            appendAssistantMessage('assistant', 'Connecting to Nova Sonic…');
+            const origin = window.location.origin;
+            try {
+                novaSocket = window.io(origin, { path: '/socket.io', transports: ['websocket', 'polling'], reconnection: false });
+                await new Promise((resolve, reject) => {
+                    novaSocket.on('connect', resolve);
+                    novaSocket.on('connect_error', (err) => reject(err));
+                    novaSocket.on('error', (e) => reject(e.message || e));
+                });
+                novaSocket.on('session_started', () => {
+                    novaSessionActive = true;
+                    const last = assistantMessages.querySelector('.assistant-message.assistant:last-of-type');
+                    if (last && last.textContent.includes('Connecting to Nova Sonic')) last.textContent = 'Nova listening — speak now.';
+                    startNovaMic();
+                });
+                novaSocket.on('transcript', (data) => {
+                    if (data && data.text) appendAssistantMessage(data.role || 'assistant', data.text);
+                });
+                novaSocket.on('audio_output', (data) => {
+                    if (!data || !data.audio) return;
+                    try {
+                        const binary = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                        const len = binary.length >>> 1;
+                        const int16 = new Int16Array(len);
+                        const view = new DataView(binary.buffer, binary.byteOffset, binary.length);
+                        for (let i = 0; i < len; i++) int16[i] = view.getInt16(i * 2, true);
+                        const ctx = novaPlaybackContext || novaAudioContext || (novaPlaybackContext = new (window.AudioContext || window.webkitAudioContext)());
+                        const sampleRate = 24000;
+                        const ab = ctx.createBuffer(1, len, sampleRate);
+                        const ch = ab.getChannelData(0);
+                        for (let i = 0; i < len; i++) ch[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
+                        novaAudioQueue.push(ab);
+                        function playNext() {
+                            if (novaAudioQueue.length === 0) { novaAudioPlaying = false; return; }
+                            novaAudioPlaying = true;
+                            const buffer = novaAudioQueue.shift();
+                            const c = novaPlaybackContext || novaAudioContext;
+                            if (!c) { novaAudioPlaying = false; return; }
+                            const src = c.createBufferSource();
+                            src.buffer = buffer;
+                            src.connect(c.destination);
+                            src.onended = playNext;
+                            src.start(0);
+                        }
+                        if (!novaAudioPlaying) playNext();
+                    } catch (e) { console.warn('Nova audio play failed', e); }
+                });
+                novaSocket.on('session_ended', () => { novaSessionActive = false; });
+                novaSocket.on('error', (data) => appendAssistantMessage('assistant', 'Nova: ' + (data.message || 'Error')));
+                novaSocket.on('disconnect', () => {
+                    novaSessionActive = false;
+                    stopNovaVoice();
+                });
+                novaSocket.emit('start_session', {
+                    region: 'us-east-1',
+                    voice: 'tiffany',
+                    systemPrompt: 'You are a helpful voice assistant in the chat.',
+                    temperature: 0.7,
+                    topP: 0.9,
+                    maxTokens: 1024,
+                    sampleRate: 24000,
+                    tools: []
+                });
+            } catch (err) {
+                appendAssistantMessage('assistant', 'Nova: ' + (err.message || 'Connection failed'));
+                stopNovaVoice();
+                btn.disabled = false;
+                btn.classList.remove('recording');
+                return;
+            }
+            btn.disabled = false;
+        }
+
+        async function startNovaMic() {
+            if (novaRecordingStream || !novaSocket || !novaSessionActive) return;
+            try {
+                novaRecordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                novaAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                novaSource = novaAudioContext.createMediaStreamSource(novaRecordingStream);
+                const bufferSize = 2048;
+                novaScriptProcessor = novaAudioContext.createScriptProcessor(bufferSize, 1, 1);
+                novaScriptProcessor.onaudioprocess = (e) => {
+                    if (!novaSocket || !novaSocket.connected || !novaSessionActive) return;
+                    const input = e.inputBuffer.getChannelData(0);
+                    const rate = e.inputBuffer.sampleRate;
+                    const b64 = novaBase64FromFloat32(input, rate, 16000);
+                    if (b64) novaSocket.emit('audio_input', b64);
+                };
+                novaSource.connect(novaScriptProcessor);
+                novaScriptProcessor.connect(novaAudioContext.destination);
+            } catch (err) {
+                appendAssistantMessage('assistant', 'Nova: microphone failed — ' + (err.message || 'Unknown'));
+                stopNovaVoice();
+            }
+        }
+
+        function stopNovaVoice() {
+            novaSessionActive = false;
+            novaAudioQueue.length = 0;
+            if (novaScriptProcessor) {
+                try { novaScriptProcessor.disconnect(); } catch (e) {}
+                novaScriptProcessor = null;
+            }
+            if (novaSource) {
+                try { novaSource.disconnect(); } catch (e) {}
+                novaSource = null;
+            }
+            if (novaAudioContext) {
+                novaAudioContext.close().catch(() => {});
+                novaAudioContext = null;
+            }
+            if (novaRecordingStream) {
+                novaRecordingStream.getTracks().forEach(t => t.stop());
+                novaRecordingStream = null;
+            }
+            if (novaSocket) {
+                novaSocket.emit('end_session');
+                novaSocket.removeAllListeners();
+                novaSocket.disconnect();
+                novaSocket = null;
+            }
+            if (assistantNovaBtn) {
+                assistantNovaBtn.classList.remove('recording');
+                assistantNovaBtn.disabled = false;
+            }
+        }
+
+        if (assistantNovaBtn) {
+            assistantNovaBtn.addEventListener('click', () => {
+                if (novaSessionActive || (novaSocket && novaSocket.connected)) {
+                    stopNovaVoice();
+                } else {
+                    startNovaVoice();
                 }
             });
         }

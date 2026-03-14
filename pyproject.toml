@@ -25,4 +25,6 @@ dependencies = [
     "strands-agents[openai]==1.29.0",
     "psycopg2-binary>=2.9.11",
     "edge-tts>=6.1.0",
+    "python-socketio>=5.16.1",
+    "aws-sdk-bedrock-runtime>=0.4.0",
 ]

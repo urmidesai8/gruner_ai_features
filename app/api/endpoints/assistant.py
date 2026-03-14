@@ -326,6 +326,14 @@ class AssistantFeedbackRequest(BaseModel):
     feedback: str = Field(..., description="One of: positive, negative")
 
 
+@router.get("/config")
+async def get_assistant_config() -> JSONResponse:
+    """Return client-safe config (e.g. Nova voice backend URL) for the chat assistant UI."""
+    return JSONResponse(content={
+        "nova_voice_url": settings.NOVA_VOICE_URL or "",
+    })
+
+
 @router.post("/assistant/stream", response_class=StreamingResponse)
 async def stream_assistant(request: AssistantRequest) -> StreamingResponse:
     """

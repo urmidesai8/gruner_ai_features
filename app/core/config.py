@@ -44,6 +44,9 @@ class Settings:
     # V2V (voice-to-voice): TTS voice for assistant reply (edge-tts voice id)
     TTS_VOICE: str = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 
+    # Nova Sonic voice backend (optional) — Socket.IO server URL for live voice
+    NOVA_VOICE_URL: str = os.getenv("NOVA_VOICE_URL", "")
+
     # Postgres settings for assistant feedback
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")
