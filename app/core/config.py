@@ -41,7 +41,7 @@ class Settings:
         os.getenv("ASSISTANT_EXECUTOR_WORKERS", "4")
     )
 
-    # V2V (voice-to-voice): TTS voice for assistant reply (edge-tts voice id)
+    # Edge TTS (voice-to-voice): TTS voice for assistant reply (edge-tts voice id)
     TTS_VOICE: str = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 
     # Nova Sonic voice backend (optional) — Socket.IO server URL for live voice

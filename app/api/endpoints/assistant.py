@@ -326,6 +326,38 @@ class AssistantFeedbackRequest(BaseModel):
     feedback: str = Field(..., description="One of: positive, negative")
 
 
+class AssistantSpeakRequest(BaseModel):
+    """Request body for TTS: speak the given text (e.g. after GPT-Edge reply)."""
+    text: str = Field(..., min_length=1, max_length=settings.ASSISTANT_MAX_MESSAGE_LENGTH)
+
+
+@router.post("/assistant/speak")
+async def assistant_speak(request: AssistantSpeakRequest) -> JSONResponse:
+    """
+    Convert text to speech using edge-tts. Used by GPT-Edge to read aloud the assistant reply.
+    Returns JSON with audio_base64 (MP3) and audio_content_type.
+    """
+    text = (request.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required.")
+    try:
+        audio_bytes = await text_to_speech(text)
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="TTS produced no audio.")
+        audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+        return JSONResponse(
+            content={
+                "audio_base64": audio_base64,
+                "audio_content_type": "audio/mpeg",
+            }
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception as e:
+        logger.exception("TTS failed: %s", e)
+        raise HTTPException(status_code=500, detail="Text-to-speech failed.") from e
+
+
 @router.get("/config")
 async def get_assistant_config() -> JSONResponse:
     """Return client-safe config (e.g. Nova voice backend URL) for the chat assistant UI."""
@@ -499,7 +531,7 @@ async def assistant_audio(
 
 
 # ---------------------------------------------------------------------------
-# V2V (Voice-to-Voice): speak → transcribe → Strands agent → TTS → play reply
+# Edge TTS (Voice-to-Voice): speak → transcribe → Strands agent → TTS → play reply
 # ---------------------------------------------------------------------------
 
 @router.post("/assistant/v2v")
@@ -533,7 +565,7 @@ async def assistant_v2v(
             lambda: transcribe_audio((filename, buf)),
         )
     except Exception as e:
-        logger.exception("V2V transcription failed")
+        logger.exception("Edge TTS transcription failed")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}") from e
 
     if not transcription or (isinstance(transcription, str) and transcription.strip().lower().startswith("error")):
@@ -558,7 +590,7 @@ async def assistant_v2v(
         )
         reply_text = str(reply).strip()
     except Exception as e:
-        logger.exception("V2V assistant agent failed")
+        logger.exception("Edge TTS assistant agent failed")
         raise HTTPException(status_code=500, detail=f"Assistant failed: {e}") from e
 
     append_session_messages(
@@ -577,7 +609,7 @@ async def assistant_v2v(
             if audio_bytes:
                 audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
         except Exception as e:
-            logger.warning("V2V TTS failed (reply still returned as text): %s", e)
+            logger.warning("Edge TTS TTS failed (reply still returned as text): %s", e)
 
     return JSONResponse(
         content={

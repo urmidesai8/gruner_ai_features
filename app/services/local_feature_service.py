@@ -234,7 +234,7 @@ def analyze_moderation_local(messages: list, model_id: str) -> dict:
             # facebook/roberta-base-openai-detector: Label_0 (Safe) / Label_1 (Unsafe) usually? 
             # actually it's "Fake" vs "Real" or similar? 
             # Let's check typical outputs. User cited "facebook/roberta-base-openai-detector". 
-            # Actually that model detects GPT-2 generated text, not toxicity.
+            # Actually that model detects GPT-Edge-2 generated text, not toxicity.
             # User might have meant "facebook/roberta-hate-speech-dynabench-r4-target"?
             # Or "unitary/unbiased-toxic-roberta".
             

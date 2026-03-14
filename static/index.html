@@ -418,16 +418,28 @@
             position: fixed;
             bottom: 96px;
             right: 24px;
-            width: 320px;
-            max-height: 480px;
+            width: 420px;
+            min-width: 360px;
+            min-height: 420px;
+            max-height: 70vh;
+            height: 560px;
             background: #ffffff;
             border-radius: 12px;
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
-            display: flex;
+            display: none;
             flex-direction: column;
             overflow: hidden;
             z-index: 1100;
-            display: none;
+            transition: width 0.2s ease, height 0.2s ease, bottom 0.2s ease, right 0.2s ease, max-height 0.2s ease;
+        }
+
+        .assistant-widget.expanded {
+            bottom: 20px;
+            right: 20px;
+            width: min(92vw, 900px);
+            height: 85vh;
+            max-height: 85vh;
+            min-height: 400px;
         }
 
         .assistant-header {
@@ -437,11 +449,39 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            flex-shrink: 0;
         }
 
         .assistant-header-title {
             font-size: 0.95rem;
             font-weight: 600;
+        }
+
+        .assistant-header-controls {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .assistant-header-controls button {
+            background: transparent;
+            border: none;
+            color: rgba(255,255,255,0.9);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .assistant-header-controls button:hover {
+            background: rgba(255,255,255,0.2);
+            color: #fff;
+        }
+
+        .assistant-header-controls .material-icons-outlined {
+            font-size: 1.1rem;
         }
 
         .assistant-header-close {
@@ -597,6 +637,36 @@
             cursor: not-allowed;
         }
         .assistant-nova-btn .material-icons-outlined {
+            font-size: 1rem;
+        }
+        .assistant-nova-gpt-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: linear-gradient(135deg, #0d47a1 0%, #1565c0 100%);
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: background 0.2s, box-shadow 0.2s;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .assistant-nova-gpt-btn:hover {
+            background: linear-gradient(135deg, #1565c0 0%, #1976d2 100%);
+            box-shadow: 0 2px 8px rgba(21, 101, 192, 0.4);
+        }
+        .assistant-nova-gpt-btn.recording {
+            background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
+        .assistant-nova-gpt-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .assistant-nova-gpt-btn .material-icons-outlined {
             font-size: 1rem;
         }
         @keyframes assistant-pulse {
@@ -818,7 +888,7 @@
             <option value="mixtral-8x7b-32768">Mixtral 8x7B</option>
             <option value="gemma2-9b-it">Gemma 2 9B</option>
             <option value="deepseek-r1-distill-llama-70b">DeepSeek R1 Distill 70B</option>
-            <option value="openai/gpt-oss-120b">GPT OSS 120B</option>
+            <option value="openai/gpt-oss-120b">GPT-Edge OSS 120B</option>
         </select>
         <label for="aiToggle">
             <span id="aiStatusLabel">AI Features: </span>
@@ -1029,7 +1099,15 @@
     <div id="assistantWidget" class="assistant-widget">
         <div class="assistant-header">
             <div class="assistant-header-title">AI Assistant</div>
-            <div id="assistantClose" class="assistant-header-close">&times;</div>
+            <div class="assistant-header-controls">
+                <button id="assistantMinimize" type="button" title="Minimize" aria-label="Minimize">
+                    <span class="material-icons-outlined">remove</span>
+                </button>
+                <button id="assistantExpand" type="button" title="Expand / Restore" aria-label="Expand">
+                    <span class="material-icons-outlined" id="assistantExpandIcon">fullscreen</span>
+                </button>
+                <div id="assistantClose" class="assistant-header-close" title="Close">&times;</div>
+            </div>
         </div>
         <div id="assistantMessages" class="assistant-messages">
             <div class="assistant-message assistant">
@@ -1039,10 +1117,14 @@
         <div class="assistant-input-area">
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
             <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
-            <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 V2V</button>
+            <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 Edge TTS</button>
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
                 <span class="material-icons-outlined">record_voice_over</span>
                 <span>Nova</span>
+            </button>
+            <button id="assistantNovaGpt" class="assistant-nova-gpt-btn" title="GPT-Edge: speak to type, then send and hear reply">
+                <span class="material-icons-outlined">keyboard_voice</span>
+                <span>GPT-Edge</span>
             </button>
             <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
@@ -1179,7 +1261,7 @@
                 { value: 'llama-3.1-8b-instant', text: 'Llama 3.1 8B (Groq Cloud)' }
             ],
             'summary': [
-                { value: 'openai/gpt-oss-120b', text: 'GPT OSS 120B (Offline Default)' },
+                { value: 'openai/gpt-oss-120b', text: 'GPT-Edge OSS 120B (Offline Default)' },
                 { value: 'llama-3.3-70b-versatile', text: 'Llama 3.3 70B (Groq Cloud)' }
             ],
             'tasks': [
@@ -2001,7 +2083,7 @@
                 model = 'openai/gpt-oss-120b';
                 totalMessages = 10;
                 // Optional: Notify user
-                // alert("AI is disabled. Generating summary using backup model (GPT OSS 120B) for last 10 messages.");
+                // alert("AI is disabled. Generating summary using backup model (GPT-Edge OSS 120B) for last 10 messages.");
             } else {
                 const totalMessagesInput = document.getElementById('summaryTotalMessages');
                 totalMessages = totalMessagesInput && totalMessagesInput.value ? parseInt(totalMessagesInput.value) : 100;
@@ -2938,7 +3020,12 @@
         const assistantSend = document.getElementById('assistantSend');
         const assistantMic = document.getElementById('assistantMic');
         const assistantNovaBtn = document.getElementById('assistantNova');
+        const assistantNovaGptBtn = document.getElementById('assistantNovaGpt');
         let assistantSessionId = null;
+        let novaGptRecordingUsed = false;
+        let novaGptRecognition = null;
+        let novaGptSpeakAudio = null;
+        let novaGptCommittedText = '';
         let assistantMediaRecorder = null;
         let assistantRecordingStream = null;
         let assistantRecordingChunks = [];
@@ -2974,6 +3061,9 @@
         async function sendAssistantMessage() {
             const text = assistantInput.value.trim();
             if (!text) return;
+
+            const shouldSpeakReply = novaGptRecordingUsed;
+            if (novaGptRecordingUsed) novaGptRecordingUsed = false;
 
             appendAssistantMessage('user', text);
             assistantInput.value = '';
@@ -3044,6 +3134,27 @@
 
                 if (assistantReply) {
                     attachAssistantFeedback(thinkingNode, assistantReply);
+                    if (shouldSpeakReply && assistantReply.trim()) {
+                        try {
+                            const speakRes = await fetch('/api/features/assistant/speak', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ text: assistantReply.trim() })
+                            });
+                            if (speakRes.ok) {
+                                const data = await speakRes.json();
+                                if (data.audio_base64) {
+                                    const bytes = Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0));
+                                    const blob = new Blob([bytes], { type: data.audio_content_type || 'audio/mpeg' });
+                                    const url = URL.createObjectURL(blob);
+                                    if (novaGptSpeakAudio) { novaGptSpeakAudio.pause(); novaGptSpeakAudio.src = ''; }
+                                    novaGptSpeakAudio = new Audio(url);
+                                    novaGptSpeakAudio.onended = () => URL.revokeObjectURL(url);
+                                    await novaGptSpeakAudio.play();
+                                }
+                            }
+                        } catch (e) { console.warn('GPT-Edge TTS failed:', e); }
+                    }
                 }
             } catch (error) {
                 if (thinkingNode.textContent === 'Thinking...') {
@@ -3141,7 +3252,7 @@
                 assistantV2vMediaRecorder.start(100);
                 if (v2vBtn) { v2vBtn.classList.add('recording'); v2vBtn.title = 'Click to stop and hear reply'; }
             }).catch(err => {
-                console.error('V2V microphone failed:', err);
+                console.error('Edge TTS microphone failed:', err);
                 appendAssistantMessage('assistant', 'Could not access microphone. Please allow audio and try again.');
             });
         }
@@ -3152,7 +3263,8 @@
         }
 
         async function sendAssistantV2v(blob) {
-            appendAssistantMessage('user', '(Voice – processing…)');
+            const userMsgNode = appendAssistantMessage('user', '(Voice – processing…)');
+            userMsgNode.dataset.v2vPlaceholder = 'true';
             const thinkingNode = appendAssistantMessage('assistant', 'Transcribing, thinking, and generating speech…');
             try {
                 const form = new FormData();
@@ -3162,14 +3274,12 @@
                 const data = await response.json();
                 if (!response.ok) {
                     thinkingNode.textContent = data.detail || 'Request failed.';
-                    const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
-                    if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) userPlaceholder.remove();
+                    if (userMsgNode) userMsgNode.remove();
                     return;
                 }
-                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
-                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) {
-                    userPlaceholder.textContent = data.transcription || '(Voice)';
-                }
+                const transcript = (data.transcription || '').trim();
+                userMsgNode.textContent = transcript ? `You said: ${transcript}` : '(No speech detected)';
+                delete userMsgNode.dataset.v2vPlaceholder;
                 const replyText = data.reply || '(No response)';
                 thinkingNode.textContent = replyText;
                 if (data.session_id) assistantSessionId = data.session_id;
@@ -3185,8 +3295,7 @@
                 }
             } catch (error) {
                 thinkingNode.textContent = 'Error: ' + error.message;
-                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
-                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) userPlaceholder.remove();
+                if (userMsgNode && userMsgNode.dataset.v2vPlaceholder) userMsgNode.remove();
             }
         }
 
@@ -3421,6 +3530,111 @@
             });
         }
 
+        // --- GPT-Edge: speak to type in composer, then send and hear reply via TTS ---
+        function startNovaGptRecording() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                appendAssistantMessage('assistant', 'GPT-Edge: Speech recognition is not supported in this browser. Try Chrome.');
+                return;
+            }
+            if (novaGptRecognition) {
+                try { novaGptRecognition.stop(); } catch (e) {}
+                novaGptRecognition = null;
+            }
+            novaGptCommittedText = assistantInput.value;
+            novaGptRecognition = new SpeechRecognition();
+            novaGptRecognition.continuous = true;
+            novaGptRecognition.interimResults = true;
+            novaGptRecognition.lang = 'en-US';
+            novaGptRecognition.onresult = (e) => {
+                let interim = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    const transcript = e.results[i][0].transcript;
+                    if (e.results[i].isFinal) {
+                        novaGptCommittedText += (novaGptCommittedText ? ' ' : '') + transcript;
+                        novaGptRecordingUsed = true;
+                    } else {
+                        interim += transcript;
+                    }
+                }
+                assistantInput.value = novaGptCommittedText + (interim ? ' ' + interim : '');
+            };
+            novaGptRecognition.onerror = (e) => {
+                if (e.error === 'not-allowed' || e.error === 'permission-denied') {
+                    appendAssistantMessage('assistant', 'GPT-Edge: Microphone access denied. Allow the site to use your microphone.');
+                } else if (e.error !== 'aborted') {
+                    appendAssistantMessage('assistant', 'GPT-Edge: ' + (e.error || 'Recognition error'));
+                }
+                stopNovaGptRecording();
+            };
+            novaGptRecognition.onend = () => {
+                if (novaGptRecognition && assistantNovaGptBtn && assistantNovaGptBtn.classList.contains('recording')) {
+                    assistantNovaGptBtn.classList.remove('recording');
+                    assistantNovaGptBtn.disabled = false;
+                    assistantNovaGptBtn.title = 'GPT-Edge: speak to type, then send and hear reply';
+                }
+                novaGptRecognition = null;
+            };
+            try {
+                novaGptRecognition.start();
+                if (assistantNovaGptBtn) {
+                    assistantNovaGptBtn.classList.add('recording');
+                    assistantNovaGptBtn.disabled = false;
+                    assistantNovaGptBtn.title = 'Click to stop listening';
+                }
+            } catch (err) {
+                appendAssistantMessage('assistant', 'GPT-Edge: Could not start microphone — ' + (err.message || 'Unknown'));
+                novaGptRecognition = null;
+                if (assistantNovaGptBtn) {
+                    assistantNovaGptBtn.classList.remove('recording');
+                    assistantNovaGptBtn.disabled = false;
+                }
+            }
+        }
+
+        function stopNovaGptRecording() {
+            if (novaGptRecognition) {
+                try { novaGptRecognition.stop(); } catch (e) {}
+                novaGptRecognition = null;
+            }
+            if (assistantNovaGptBtn) {
+                assistantNovaGptBtn.classList.remove('recording');
+                assistantNovaGptBtn.disabled = false;
+                assistantNovaGptBtn.title = 'GPT-Edge: speak to type, then send and hear reply';
+            }
+        }
+
+        if (assistantNovaGptBtn) {
+            assistantNovaGptBtn.addEventListener('click', () => {
+                if (novaGptRecognition) {
+                    stopNovaGptRecording();
+                } else {
+                    startNovaGptRecording();
+                }
+            });
+        }
+
+        const assistantMinimize = document.getElementById('assistantMinimize');
+        const assistantExpand = document.getElementById('assistantExpand');
+        const assistantExpandIcon = document.getElementById('assistantExpandIcon');
+        if (assistantMinimize) {
+            assistantMinimize.addEventListener('click', () => {
+                if (assistantWidget.classList.contains('expanded')) {
+                    assistantWidget.classList.remove('expanded');
+                    if (assistantExpandIcon) assistantExpandIcon.textContent = 'fullscreen';
+                } else {
+                    toggleAssistant(false);
+                }
+            });
+        }
+        if (assistantExpand) {
+            assistantExpand.addEventListener('click', () => {
+                assistantWidget.classList.toggle('expanded');
+                if (assistantExpandIcon) {
+                    assistantExpandIcon.textContent = assistantWidget.classList.contains('expanded') ? 'fullscreen_exit' : 'fullscreen';
+                }
+            });
+        }
         assistantFab.addEventListener('click', () => toggleAssistant());
         assistantClose.addEventListener('click', () => toggleAssistant(false));
         assistantSend.addEventListener('click', sendAssistantMessage);

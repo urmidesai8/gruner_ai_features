@@ -1,5 +1,5 @@
 """
-Text-to-speech service for V2V (voice-to-voice) assistant replies.
+Text-to-speech service for Edge TTS (voice-to-voice) assistant replies.
 Uses edge-tts (Microsoft Edge TTS, no API key required).
 """
 import logging
@@ -7,7 +7,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Lazy import to avoid requiring edge_tts when not using V2V
+# Lazy import to avoid requiring edge_tts when not using Edge TTS
 _edge_tts = None
 
 def _get_edge_tts():
@@ -18,7 +18,7 @@ def _get_edge_tts():
             _edge_tts = et
         except ImportError:
             raise RuntimeError(
-                "edge-tts is required for V2V. Install with: pip install edge-tts"
+                "edge-tts is required for Edge TTS. Install with: pip install edge-tts"
             )
     return _edge_tts
 
