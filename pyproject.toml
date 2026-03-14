@@ -24,4 +24,5 @@ dependencies = [
     "redis>=7.2.0",
     "strands-agents[openai]==1.29.0",
     "psycopg2-binary>=2.9.11",
+    "edge-tts>=6.1.0",
 ]

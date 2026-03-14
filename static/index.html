@@ -547,6 +547,26 @@
             background: #c62828;
             animation: assistant-pulse 1s ease-in-out infinite;
         }
+        .assistant-v2v-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: #2e7d32;
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s;
+            font-size: 0.85rem;
+        }
+        .assistant-v2v-btn:hover {
+            background: #1b5e20;
+        }
+        .assistant-v2v-btn.recording {
+            background: #c62828;
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
         @keyframes assistant-pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
@@ -986,7 +1006,8 @@
         </div>
         <div class="assistant-input-area">
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
-            <button id="assistantMic" class="assistant-mic-btn" title="Hold to speak or click to start/stop">🎤</button>
+            <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
+            <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 V2V</button>
             <button id="assistantSend" class="assistant-send-btn">Send</button>
         </div>
     </div>
@@ -2884,6 +2905,10 @@
         let assistantMediaRecorder = null;
         let assistantRecordingStream = null;
         let assistantRecordingChunks = [];
+        let assistantV2vMediaRecorder = null;
+        let assistantV2vRecordingStream = null;
+        let assistantV2vRecordingChunks = [];
+        let assistantV2vAudio = null;
 
         function toggleAssistant(open) {
             const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
@@ -3047,6 +3072,77 @@
             }
         }
 
+        function startV2vRecording() {
+            if (assistantV2vMediaRecorder && assistantV2vMediaRecorder.state === 'recording') return;
+            const v2vBtn = document.getElementById('assistantV2v');
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                assistantV2vRecordingStream = stream;
+                assistantV2vRecordingChunks = [];
+                const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+                assistantV2vMediaRecorder = new MediaRecorder(stream);
+                assistantV2vMediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) assistantV2vRecordingChunks.push(e.data); };
+                assistantV2vMediaRecorder.onstop = () => {
+                    if (assistantV2vRecordingStream) assistantV2vRecordingStream.getTracks().forEach(t => t.stop());
+                    assistantV2vRecordingStream = null;
+                    if (assistantV2vRecordingChunks.length > 0) {
+                        const blob = new Blob(assistantV2vRecordingChunks, { type: mime });
+                        sendAssistantV2v(blob);
+                    }
+                    assistantV2vMediaRecorder = null;
+                    if (v2vBtn) { v2vBtn.classList.remove('recording'); v2vBtn.title = 'Voice-to-voice: speak and hear spoken reply'; }
+                };
+                assistantV2vMediaRecorder.start(100);
+                if (v2vBtn) { v2vBtn.classList.add('recording'); v2vBtn.title = 'Click to stop and hear reply'; }
+            }).catch(err => {
+                console.error('V2V microphone failed:', err);
+                appendAssistantMessage('assistant', 'Could not access microphone. Please allow audio and try again.');
+            });
+        }
+
+        function stopV2vRecording() {
+            if (!assistantV2vMediaRecorder || assistantV2vMediaRecorder.state !== 'recording') return;
+            assistantV2vMediaRecorder.stop();
+        }
+
+        async function sendAssistantV2v(blob) {
+            appendAssistantMessage('user', '(Voice – processing…)');
+            const thinkingNode = appendAssistantMessage('assistant', 'Transcribing, thinking, and generating speech…');
+            try {
+                const form = new FormData();
+                form.append('file', blob, 'audio.webm');
+                if (assistantSessionId) form.append('session_id', assistantSessionId);
+                const response = await fetch('/api/features/assistant/v2v', { method: 'POST', body: form });
+                const data = await response.json();
+                if (!response.ok) {
+                    thinkingNode.textContent = data.detail || 'Request failed.';
+                    const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                    if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) userPlaceholder.remove();
+                    return;
+                }
+                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) {
+                    userPlaceholder.textContent = data.transcription || '(Voice)';
+                }
+                const replyText = data.reply || '(No response)';
+                thinkingNode.textContent = replyText;
+                if (data.session_id) assistantSessionId = data.session_id;
+                attachAssistantFeedback(thinkingNode, replyText);
+                if (data.audio_base64) {
+                    const audioBytes = Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0));
+                    const audioBlob = new Blob([audioBytes], { type: data.audio_content_type || 'audio/mpeg' });
+                    const url = URL.createObjectURL(audioBlob);
+                    if (assistantV2vAudio) { assistantV2vAudio.pause(); assistantV2vAudio.src = ''; }
+                    assistantV2vAudio = new Audio(url);
+                    assistantV2vAudio.onended = () => URL.revokeObjectURL(url);
+                    await assistantV2vAudio.play();
+                }
+            } catch (error) {
+                thinkingNode.textContent = 'Error: ' + error.message;
+                const userPlaceholder = assistantMessages.querySelector('.assistant-message.user:last-of-type');
+                if (userPlaceholder && userPlaceholder.textContent.includes('(Voice –')) userPlaceholder.remove();
+            }
+        }
+
         function attachAssistantFeedback(node, replyText) {
             if (!node || !replyText || node.dataset.feedbackAttached === 'true') return;
             node.dataset.feedbackAttached = 'true';
@@ -3098,6 +3194,17 @@
                 startAssistantRecording();
             }
         });
+
+        const assistantV2v = document.getElementById('assistantV2v');
+        if (assistantV2v) {
+            assistantV2v.addEventListener('click', () => {
+                if (assistantV2vMediaRecorder && assistantV2vMediaRecorder.state === 'recording') {
+                    stopV2vRecording();
+                } else {
+                    startV2vRecording();
+                }
+            });
+        }
 
         assistantFab.addEventListener('click', () => toggleAssistant());
         assistantClose.addEventListener('click', () => toggleAssistant(false));

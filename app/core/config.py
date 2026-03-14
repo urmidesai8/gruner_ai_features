@@ -41,6 +41,9 @@ class Settings:
         os.getenv("ASSISTANT_EXECUTOR_WORKERS", "4")
     )
 
+    # V2V (voice-to-voice): TTS voice for assistant reply (edge-tts voice id)
+    TTS_VOICE: str = os.getenv("TTS_VOICE", "en-US-JennyNeural")
+
     # Postgres settings for assistant feedback
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "")

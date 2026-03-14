@@ -4,6 +4,7 @@ Includes session/memory management (Redis with in-memory fallback) and productio
 Supports text and live-audio input (transcribe then run agent), plus feedback logging.
 """
 import asyncio
+import base64
 import io
 import json
 import logging
@@ -22,6 +23,7 @@ from strands.models.openai import OpenAIModel
 
 from app.core.config import settings
 from app.services.ai_service import transcribe_audio
+from app.services.tts_service import text_to_speech
 
 logger = logging.getLogger(__name__)
 
@@ -484,5 +486,97 @@ async def assistant_audio(
             "reply": reply_text,
             "session_id": sid,
             "transcription": message,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# V2V (Voice-to-Voice): speak → transcribe → Strands agent → TTS → play reply
+# ---------------------------------------------------------------------------
+
+@router.post("/assistant/v2v")
+async def assistant_v2v(
+    file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
+    session_id: Optional[str] = Form(None),
+) -> JSONResponse:
+    """
+    Voice-to-voice: user speaks → transcribe (Groq Whisper) → Strands agent → TTS (edge-tts) → return reply + audio.
+    Same session memory as text/audio endpoints. Returns reply text, transcription, session_id, and audio_base64 (MP3).
+    """
+    if not file.filename and not getattr(file, "content_type", ""):
+        raise HTTPException(status_code=400, detail="Audio file is required.")
+
+    try:
+        content = await file.read()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to read audio: {e}") from e
+
+    if not content or len(content) < 100:
+        raise HTTPException(status_code=400, detail="Audio data too short or empty.")
+
+    filename = file.filename or "audio.webm"
+    buf = io.BytesIO(content)
+    buf.name = filename
+
+    loop = asyncio.get_event_loop()
+    try:
+        transcription = await loop.run_in_executor(
+            None,
+            lambda: transcribe_audio((filename, buf)),
+        )
+    except Exception as e:
+        logger.exception("V2V transcription failed")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {e}") from e
+
+    if not transcription or (isinstance(transcription, str) and transcription.strip().lower().startswith("error")):
+        raise HTTPException(
+            status_code=400,
+            detail=transcription or "Transcription returned no text.",
+        )
+
+    message = transcription.strip()
+    if len(message) > settings.ASSISTANT_MAX_MESSAGE_LENGTH:
+        message = message[: settings.ASSISTANT_MAX_MESSAGE_LENGTH]
+
+    sid = (session_id or "").strip() or str(uuid.uuid4())
+    history = get_session_messages(sid)
+    prompt = build_context_from_history(history, message)
+
+    executor = _get_executor()
+    try:
+        reply = await loop.run_in_executor(
+            executor,
+            lambda: assistant_agent(prompt),
+        )
+        reply_text = str(reply).strip()
+    except Exception as e:
+        logger.exception("V2V assistant agent failed")
+        raise HTTPException(status_code=500, detail=f"Assistant failed: {e}") from e
+
+    append_session_messages(
+        sid,
+        [
+            {"role": "user", "content": message},
+            {"role": "assistant", "content": reply_text or "(no output)"},
+        ],
+    )
+
+    # TTS: convert reply to speech (MP3)
+    audio_base64 = ""
+    if reply_text:
+        try:
+            audio_bytes = await text_to_speech(reply_text)
+            if audio_bytes:
+                audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+        except Exception as e:
+            logger.warning("V2V TTS failed (reply still returned as text): %s", e)
+
+    return JSONResponse(
+        content={
+            "reply": reply_text,
+            "session_id": sid,
+            "transcription": message,
+            "audio_base64": audio_base64,
+            "audio_content_type": "audio/mpeg",
         },
     )
