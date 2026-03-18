@@ -1,10 +1,12 @@
 import asyncio
+from concurrent.futures import InvalidStateError
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from app.api.endpoints import chat, memory, documents, audio, meeting, websocket, assistant
+from app.api.endpoints import nova_ws
 from app.nova.socket_handlers import create_socket_app
 
 
@@ -13,6 +15,10 @@ def _connection_aware_exception_handler(loop, context):
     exc = context.get("exception")
     if exc is not None and isinstance(exc, (ConnectionResetError, ConnectionAbortedError)):
         return  # Client closed connection; no traceback
+    # AWS CRT (awscrt) can raise InvalidStateError on cancelled futures during stream teardown.
+    # This is noisy but not actionable in normal stop/disconnect flows.
+    if exc is not None and isinstance(exc, InvalidStateError) and "CANCELLED" in str(exc).upper():
+        return
     asyncio.default_exception_handler(loop, context)
 
 
@@ -41,6 +47,7 @@ app.include_router(audio.router, prefix="/api/features", tags=["Audio"])
 app.include_router(meeting.router, prefix="/api/features", tags=["Meeting"])
 app.include_router(assistant.router, prefix="/api/features", tags=["Assistant"])
 app.include_router(websocket.router, tags=["websocket"])
+app.include_router(nova_ws.router, tags=["nova-ws"])
 
 # Mount Static Files
 app.mount("/static", StaticFiles(directory="static"), name="static")

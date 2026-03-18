@@ -639,6 +639,36 @@
         .assistant-nova-btn .material-icons-outlined {
             font-size: 1rem;
         }
+        .assistant-nova-ws-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: linear-gradient(135deg, #00796b 0%, #009688 100%);
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: background 0.2s, box-shadow 0.2s;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .assistant-nova-ws-btn:hover {
+            background: linear-gradient(135deg, #00695c 0%, #00897b 100%);
+            box-shadow: 0 2px 8px rgba(0, 150, 136, 0.35);
+        }
+        .assistant-nova-ws-btn.recording {
+            background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
+        .assistant-nova-ws-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .assistant-nova-ws-btn .material-icons-outlined {
+            font-size: 1rem;
+        }
         .assistant-nova-gpt-btn {
             padding: 6px 10px;
             border-radius: 6px;
@@ -1121,6 +1151,10 @@
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
                 <span class="material-icons-outlined">record_voice_over</span>
                 <span>Nova</span>
+            </button>
+            <button id="assistantNovaWs" class="assistant-nova-ws-btn" title="Nova Sonic (Native WS): live voice over FastAPI WebSocket">
+                <span class="material-icons-outlined">wifi</span>
+                <span>Nova WS</span>
             </button>
             <button id="assistantNovaGpt" class="assistant-nova-gpt-btn" title="GPT-Edge: speak to type, then send and hear reply">
                 <span class="material-icons-outlined">keyboard_voice</span>
@@ -3020,6 +3054,7 @@
         const assistantSend = document.getElementById('assistantSend');
         const assistantMic = document.getElementById('assistantMic');
         const assistantNovaBtn = document.getElementById('assistantNova');
+        const assistantNovaWsBtn = document.getElementById('assistantNovaWs');
         const assistantNovaGptBtn = document.getElementById('assistantNovaGpt');
         let assistantSessionId = null;
         let novaGptRecordingUsed = false;
@@ -3043,6 +3078,50 @@
         let novaAudioQueue = [];
         let novaAudioPlaying = false;
         let novaPlaybackContext = null;
+
+        // Nova Sonic over native FastAPI WebSocket (/ws/nova)
+        let novaWs = null;
+        let novaWsRecordingStream = null;
+        let novaWsAudioContext = null;
+        let novaWsScriptProcessor = null;
+        let novaWsSource = null;
+        let novaWsSessionActive = false;
+        let novaWsCanSendAudio = false;
+        let novaWsAudioQueue = [];
+        let novaWsAudioPlaying = false;
+        let novaWsPlaybackContext = null;
+        let novaWsAssistantTextBuffer = '';
+        let novaWsClosing = false;
+        let novaWsDebug = true;
+        let novaWsFramesSent = 0;
+        let novaWsLastFrameAt = 0;
+        let novaWsMicRestarting = false;
+        let novaWsVadLastVoiceAt = 0;
+        let novaWsVadInSpeech = false;
+        let novaWsVadLastEndSentAt = 0;
+
+        function novaWsLog(...args) {
+            if (!novaWsDebug) return;
+            try { console.log('[NovaWS]', ...args); } catch (e) {}
+        }
+
+        async function getRobustMicStream(logFn) {
+            const attempts = [
+                { audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } },
+                { audio: true }
+            ];
+            let lastErr = null;
+            for (const constraints of attempts) {
+                try {
+                    logFn && logFn('getUserMedia attempt', constraints);
+                    return await navigator.mediaDevices.getUserMedia(constraints);
+                } catch (e) {
+                    lastErr = e;
+                    logFn && logFn('getUserMedia failed', { name: e && e.name, message: e && e.message });
+                }
+            }
+            throw lastErr || new Error('getUserMedia failed');
+        }
 
         function toggleAssistant(open) {
             const shouldOpen = typeof open === 'boolean' ? open : assistantWidget.style.display === 'none';
@@ -3469,8 +3548,9 @@
         async function startNovaMic() {
             if (novaRecordingStream || !novaSocket || !novaSessionActive) return;
             try {
-                novaRecordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                novaAudioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                novaRecordingStream = await getRobustMicStream((...a) => console.log('[Nova]', ...a));
+                // Do not force sampleRate; some headsets/drivers misbehave when forced.
+                novaAudioContext = new (window.AudioContext || window.webkitAudioContext)();
                 novaSource = novaAudioContext.createMediaStreamSource(novaRecordingStream);
                 const bufferSize = 2048;
                 novaScriptProcessor = novaAudioContext.createScriptProcessor(bufferSize, 1, 1);
@@ -3481,8 +3561,17 @@
                     const b64 = novaBase64FromFloat32(input, rate, 16000);
                     if (b64) novaSocket.emit('audio_input', b64);
                 };
+                const silentGain = novaAudioContext.createGain();
+                silentGain.gain.value = 0;
                 novaSource.connect(novaScriptProcessor);
-                novaScriptProcessor.connect(novaAudioContext.destination);
+                novaScriptProcessor.connect(silentGain);
+                silentGain.connect(novaAudioContext.destination);
+
+                const tr = (novaRecordingStream.getAudioTracks && novaRecordingStream.getAudioTracks()[0]) || null;
+                if (tr) {
+                    tr.onended = () => { if (novaSessionActive) appendAssistantMessage('assistant', 'Nova: microphone ended (device change). Please start again.'); };
+                    tr.onmute = () => { if (novaSessionActive) appendAssistantMessage('assistant', 'Nova: microphone muted (check headset/mic settings).'); };
+                }
             } catch (err) {
                 appendAssistantMessage('assistant', 'Nova: microphone failed — ' + (err.message || 'Unknown'));
                 stopNovaVoice();
@@ -3526,6 +3615,331 @@
                     stopNovaVoice();
                 } else {
                     startNovaVoice();
+                }
+            });
+        }
+
+        // --- Nova Sonic (Native WS): live voice via FastAPI WebSocket ---
+        function novaWsConnectUrl() {
+            const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            return `${proto}//${window.location.host}/ws/nova`;
+        }
+
+        async function startNovaWsVoice() {
+            if (novaWsSessionActive) return;
+            const btn = assistantNovaWsBtn;
+            if (!btn) return;
+            btn.disabled = true;
+            btn.classList.add('recording');
+            appendAssistantMessage('assistant', 'Connecting to Nova Sonic (Native WS)…');
+            novaWsClosing = false;
+            novaWsCanSendAudio = false;
+            novaWsFramesSent = 0;
+            novaWsLastFrameAt = 0;
+            novaWsLog('startNovaWsVoice click', { url: novaWsConnectUrl() });
+
+            try {
+                // Start mic capture immediately on click (user gesture) so permission prompts
+                // and AudioContext resume happen right away. Audio is only sent after session_started.
+                await startNovaWsMic();
+                // Expose debug handles for DevTools console.
+                window.novaWsAudioContext = novaWsAudioContext;
+                window.novaWsRecordingStream = novaWsRecordingStream;
+
+                novaWs = new WebSocket(novaWsConnectUrl());
+                novaWs.binaryType = 'arraybuffer';
+                window.novaWs = novaWs;
+
+                await new Promise((resolve, reject) => {
+                    const t = setTimeout(() => reject(new Error('WebSocket connect timeout')), 15000);
+                    novaWs.onopen = () => { clearTimeout(t); novaWsLog('ws open'); resolve(); };
+                    novaWs.onerror = (e) => { clearTimeout(t); novaWsLog('ws error', e); reject(new Error('WebSocket connection failed')); };
+                });
+
+                novaWs.onmessage = (evt) => {
+                    if (typeof evt.data !== 'string') return;
+                    let msg;
+                    try { msg = JSON.parse(evt.data); } catch { return; }
+                    const event = msg.event;
+                    const data = msg.data || {};
+                    novaWsLog('ws message', event, data);
+                    window.novaWsLastMessage = msg;
+
+                    if (event === 'session_started') {
+                        novaWsSessionActive = true;
+                        novaWsCanSendAudio = true;
+                        const last = assistantMessages.querySelector('.assistant-message.assistant:last-of-type');
+                        if (last && last.textContent.includes('Connecting to Nova Sonic (Native WS)')) {
+                            last.textContent = 'Nova WS listening — speak now.';
+                        }
+                        return;
+                    }
+
+                    if (event === 'transcript') {
+                        if (data.text) {
+                            const role = data.role || 'assistant';
+                            if (role === 'assistant') novaWsAssistantTextBuffer += (novaWsAssistantTextBuffer ? ' ' : '') + data.text;
+                            appendAssistantMessage(role, data.text);
+                        }
+                        return;
+                    }
+
+                    if (event === 'audio_output') {
+                        if (!data.audio) return;
+                        try {
+                            const binary = Uint8Array.from(atob(data.audio), c => c.charCodeAt(0));
+                            const len = binary.length >>> 1;
+                            const int16 = new Int16Array(len);
+                            const view = new DataView(binary.buffer, binary.byteOffset, binary.length);
+                            for (let i = 0; i < len; i++) int16[i] = view.getInt16(i * 2, true);
+                            const ctx = novaWsPlaybackContext || novaWsAudioContext || (novaWsPlaybackContext = new (window.AudioContext || window.webkitAudioContext)());
+                            const sampleRate = 24000;
+                            const ab = ctx.createBuffer(1, len, sampleRate);
+                            const ch = ab.getChannelData(0);
+                            for (let i = 0; i < len; i++) ch[i] = int16[i] / (int16[i] < 0 ? 0x8000 : 0x7FFF);
+                            novaWsAudioQueue.push(ab);
+                            function playNext() {
+                                if (novaWsAudioQueue.length === 0) { novaWsAudioPlaying = false; return; }
+                                novaWsAudioPlaying = true;
+                                const buffer = novaWsAudioQueue.shift();
+                                const c = novaWsPlaybackContext || novaWsAudioContext;
+                                if (!c) { novaWsAudioPlaying = false; return; }
+                                const src = c.createBufferSource();
+                                src.buffer = buffer;
+                                src.connect(c.destination);
+                                src.onended = playNext;
+                                src.start(0);
+                            }
+                            if (!novaWsAudioPlaying) playNext();
+                        } catch (e) { console.warn('Nova WS audio play failed', e); }
+                        return;
+                    }
+
+                    if (event === 'message_stop') {
+                        if (novaWsAssistantTextBuffer) {
+                            const lastAssistant = assistantMessages.querySelector('.assistant-message.assistant:last-of-type');
+                            if (lastAssistant && !lastAssistant.dataset.feedbackAttached) {
+                                attachAssistantFeedback(lastAssistant, novaWsAssistantTextBuffer);
+                            }
+                            novaWsAssistantTextBuffer = '';
+                        }
+                        return;
+                    }
+
+                    if (event === 'error') {
+                        appendAssistantMessage('assistant', 'Nova WS: ' + (data.message || 'Error'));
+                        return;
+                    }
+
+                    if (event === 'session_ended') {
+                        novaWsSessionActive = false;
+                    }
+                };
+
+                novaWs.onclose = () => {
+                    novaWsSessionActive = false;
+                    novaWsCanSendAudio = false;
+                    // Avoid re-entrant close loops; just clean up local resources.
+                    novaWsLog('ws close');
+                    cleanupNovaWsResources();
+                };
+
+                novaWs.send(JSON.stringify({
+                    type: 'start_session',
+                    region: 'us-east-1',
+                    voice: 'tiffany',
+                    systemPrompt: 'You are a helpful voice assistant in the chat.',
+                    temperature: 0.7,
+                    topP: 0.9,
+                    maxTokens: 1024,
+                    sampleRate: 24000,
+                    tools: []
+                }));
+                novaWsLog('sent start_session');
+            } catch (err) {
+                appendAssistantMessage('assistant', 'Nova WS: ' + (err.message || 'Connection failed'));
+                novaWsLog('startNovaWsVoice failed', err);
+                stopNovaWsVoice();
+                btn.disabled = false;
+                btn.classList.remove('recording');
+                return;
+            }
+            btn.disabled = false;
+        }
+
+        function cleanupNovaWsResources() {
+            novaWsSessionActive = false;
+            novaWsCanSendAudio = false;
+            novaWsAudioQueue.length = 0;
+            novaWsAssistantTextBuffer = '';
+
+            if (novaWsScriptProcessor) {
+                try { novaWsScriptProcessor.disconnect(); } catch (e) {}
+                novaWsScriptProcessor = null;
+            }
+            if (novaWsSource) {
+                try { novaWsSource.disconnect(); } catch (e) {}
+                novaWsSource = null;
+            }
+            if (novaWsAudioContext) {
+                novaWsAudioContext.close().catch(() => {});
+                novaWsAudioContext = null;
+            }
+            if (novaWsRecordingStream) {
+                novaWsRecordingStream.getTracks().forEach(t => t.stop());
+                novaWsRecordingStream = null;
+            }
+            if (assistantNovaWsBtn) {
+                assistantNovaWsBtn.classList.remove('recording');
+                assistantNovaWsBtn.disabled = false;
+            }
+        }
+
+        async function startNovaWsMic() {
+            if (novaWsRecordingStream) return;
+            try {
+                novaWsLog('requesting microphone permission');
+                novaWsRecordingStream = await getRobustMicStream(novaWsLog);
+                novaWsLog('microphone stream acquired', { tracks: novaWsRecordingStream.getAudioTracks().length });
+                // Do not force sampleRate; some headsets/drivers misbehave when forced.
+                novaWsAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                novaWsLog('audio context created', { state: novaWsAudioContext.state, sampleRate: novaWsAudioContext.sampleRate });
+                if (novaWsAudioContext && novaWsAudioContext.state === 'suspended') {
+                    try { await novaWsAudioContext.resume(); } catch (e) {}
+                    novaWsLog('audio context resumed', { state: novaWsAudioContext.state });
+                }
+                novaWsSource = novaWsAudioContext.createMediaStreamSource(novaWsRecordingStream);
+                const bufferSize = 2048;
+                novaWsScriptProcessor = novaWsAudioContext.createScriptProcessor(bufferSize, 1, 1);
+                novaWsScriptProcessor.onaudioprocess = (e) => {
+                    if (!novaWs || novaWs.readyState !== WebSocket.OPEN || !novaWsCanSendAudio) return;
+                    const input = e.inputBuffer.getChannelData(0);
+                    const rate = e.inputBuffer.sampleRate;
+                    // Simple RMS VAD (voice activity detection)
+                    let sum = 0;
+                    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+                    const rms = Math.sqrt(sum / input.length);
+                    const now = Date.now();
+                    const speechOn = rms > 0.015;
+                    if (speechOn) {
+                        novaWsVadLastVoiceAt = now;
+                        novaWsVadInSpeech = true;
+                    } else if (novaWsVadInSpeech && novaWsVadLastVoiceAt && (now - novaWsVadLastVoiceAt) > 750) {
+                        // End-of-utterance after 750ms of silence
+                        if ((now - novaWsVadLastEndSentAt) > 900) {
+                            try {
+                                novaWs.send(JSON.stringify({ type: 'end_utterance' }));
+                                novaWsVadLastEndSentAt = now;
+                                novaWsLog('VAD end_utterance sent', { rms });
+                            } catch (e) {}
+                        }
+                        novaWsVadInSpeech = false;
+                    }
+                    const target = 16000;
+                    const ratio = rate / target;
+                    const outLen = Math.floor(input.length / ratio);
+                    const out = new Int16Array(outLen);
+                    for (let i = 0; i < outLen; i++) {
+                        const j = i * ratio;
+                        const j0 = Math.floor(j);
+                        const j1 = Math.min(j0 + 1, input.length - 1);
+                        const frac = j - j0;
+                        const s = input[j0] * (1 - frac) + input[j1] * frac;
+                        const clamped = Math.max(-1, Math.min(1, s));
+                        out[i] = clamped < 0 ? clamped * 0x8000 : clamped * 0x7FFF;
+                    }
+                    try {
+                        novaWs.send(out.buffer);
+                        novaWsFramesSent += 1;
+                        novaWsLastFrameAt = Date.now();
+                        if (novaWsFramesSent % 50 === 0) {
+                            novaWsLog('sent frames', { count: novaWsFramesSent, lastMsAgo: Date.now() - novaWsLastFrameAt });
+                        }
+                    } catch (err) {
+                        novaWsLog('send frame failed', err);
+                    }
+                };
+                // Route through a zero-gain node so processing runs without echo/feedback.
+                const silentGain = novaWsAudioContext.createGain();
+                silentGain.gain.value = 0;
+                novaWsSource.connect(novaWsScriptProcessor);
+                novaWsScriptProcessor.connect(silentGain);
+                silentGain.connect(novaWsAudioContext.destination);
+
+                appendAssistantMessage('assistant', 'Nova WS microphone ready.');
+                novaWsLog('microphone pipeline ready');
+
+                const tr = (novaWsRecordingStream.getAudioTracks && novaWsRecordingStream.getAudioTracks()[0]) || null;
+                if (tr) {
+                    tr.onended = () => {
+                        novaWsLog('track ended');
+                        if (!novaWsClosing) restartNovaWsMic('track ended');
+                    };
+                    tr.onmute = () => {
+                        novaWsLog('track muted');
+                        if (!novaWsClosing) restartNovaWsMic('track muted');
+                    };
+                    tr.onunmute = () => novaWsLog('track unmuted');
+                }
+            } catch (err) {
+                appendAssistantMessage('assistant', 'Nova WS: microphone failed — ' + (err.message || 'Unknown'));
+                novaWsLog('microphone init failed', err);
+                stopNovaWsVoice();
+            }
+        }
+
+        async function restartNovaWsMic(reason) {
+            if (novaWsMicRestarting || novaWsClosing) return;
+            novaWsMicRestarting = true;
+            try {
+                appendAssistantMessage('assistant', `Nova WS: restarting microphone (${reason})…`);
+                // Stop current stream
+                if (novaWsRecordingStream) {
+                    try { novaWsRecordingStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+                    novaWsRecordingStream = null;
+                }
+                if (novaWsAudioContext) {
+                    try { await novaWsAudioContext.close(); } catch (e) {}
+                    novaWsAudioContext = null;
+                }
+                novaWsSource = null;
+                novaWsScriptProcessor = null;
+                await startNovaWsMic();
+            } finally {
+                novaWsMicRestarting = false;
+            }
+        }
+
+        if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+            navigator.mediaDevices.addEventListener('devicechange', () => {
+                // If user plugs in headphones/mic while Nova WS is active, restart mic pipeline.
+                if (!novaWsClosing && (novaWsSessionActive || novaWsRecordingStream)) {
+                    novaWsLog('devicechange detected');
+                    restartNovaWsMic('devicechange');
+                }
+            });
+        }
+
+        function stopNovaWsVoice() {
+            novaWsClosing = true;
+            // Stop mic / audio pipeline first to prevent sending while closing.
+            cleanupNovaWsResources();
+            if (novaWs && novaWs.readyState === WebSocket.OPEN) {
+                try { novaWs.send(JSON.stringify({ type: 'end_session' })); } catch (e) {}
+                // Give the server a moment to close Bedrock stream gracefully.
+                setTimeout(() => { try { novaWs && novaWs.close(); } catch (e) {} }, 500);
+            } else if (novaWs) {
+                try { novaWs.close(); } catch (e) {}
+            }
+            novaWs = null;
+        }
+
+        if (assistantNovaWsBtn) {
+            assistantNovaWsBtn.addEventListener('click', () => {
+                if (novaWsSessionActive || (novaWs && novaWs.readyState === WebSocket.OPEN)) {
+                    stopNovaWsVoice();
+                } else {
+                    startNovaWsVoice();
                 }
             });
         }
