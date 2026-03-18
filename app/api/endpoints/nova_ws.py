@@ -31,6 +31,8 @@ router = APIRouter()
 
 _REGION_RE = re.compile(r"^[a-z]{2}-[a-z0-9-]+-\d+$")
 _START_SESSION_GRACE_SECONDS = 20
+_MAX_AUDIO_FRAME_BYTES = 8192  # ~256ms at 16kHz mono PCM16
+_MAX_AUDIO_BYTES_PER_10S = 2_000_000  # basic backpressure/rate limit
 
 
 class _WsEmitter:
@@ -103,6 +105,8 @@ async def nova_sonic_ws(websocket: WebSocket) -> None:
     first_audio_at: float | None = None
     audio_frames = 0
     audio_bytes = 0
+    window_started_at = time.time()
+    window_audio_bytes = 0
 
     async def _close_session(reason: str) -> None:
         nonlocal session, session_started
@@ -140,6 +144,33 @@ async def nova_sonic_ws(websocket: WebSocket) -> None:
                     continue
                 try:
                     b = msg["bytes"]
+                    if not isinstance(b, (bytes, bytearray)):
+                        continue
+                    if len(b) == 0:
+                        continue
+                    if len(b) > _MAX_AUDIO_FRAME_BYTES:
+                        await emitter.emit("error", {"message": f"Audio frame too large ({len(b)} bytes)."})
+                        logger.warning("Nova WS audio frame too large session_id=%s bytes=%d", session_id, len(b))
+                        continue
+                    if (len(b) % 2) != 0:
+                        await emitter.emit("error", {"message": "Invalid audio frame (odd byte length)."})
+                        logger.warning("Nova WS invalid audio frame length session_id=%s bytes=%d", session_id, len(b))
+                        continue
+
+                    now = time.time()
+                    if now - window_started_at >= 10.0:
+                        window_started_at = now
+                        window_audio_bytes = 0
+                    window_audio_bytes += len(b)
+                    if window_audio_bytes > _MAX_AUDIO_BYTES_PER_10S:
+                        await emitter.emit("error", {"message": "Audio rate limit exceeded. Slow down."})
+                        logger.warning(
+                            "Nova WS rate limit exceeded session_id=%s bytes10s=%d",
+                            session_id,
+                            window_audio_bytes,
+                        )
+                        continue
+
                     if first_audio_at is None:
                         first_audio_at = time.time()
                         logger.info(

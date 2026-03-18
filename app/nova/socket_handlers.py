@@ -25,6 +25,9 @@ sio = socketio.AsyncServer(
 
 sessions: Dict[str, BedrockS2SSession] = {}
 tool_registry = ToolRegistry()
+_audio_window_started: Dict[str, float] = {}
+_audio_window_bytes: Dict[str, int] = {}
+_MAX_AUDIO_BYTES_PER_10S = 2_000_000
 
 
 @sio.event
@@ -100,6 +103,15 @@ async def audio_input(sid, data):
             audio_bytes = bytes(data)
         else:
             audio_bytes = base64.b64decode(data)
+        now = asyncio.get_event_loop().time()
+        started = _audio_window_started.get(sid, 0.0)
+        if not started or (now - started) >= 10.0:
+            _audio_window_started[sid] = now
+            _audio_window_bytes[sid] = 0
+        _audio_window_bytes[sid] = _audio_window_bytes.get(sid, 0) + len(audio_bytes)
+        if _audio_window_bytes[sid] > _MAX_AUDIO_BYTES_PER_10S:
+            logger.warning("[%s] audio_input rate limit exceeded bytes10s=%d", sid, _audio_window_bytes[sid])
+            return
         await session.send_audio(audio_bytes)
     except Exception as e:
         logger.warning("[%s] audio_input error: %s", sid, e)
