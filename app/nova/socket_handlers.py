@@ -3,6 +3,7 @@ Nova 2 Sonic Socket.IO handlers — merged into main app.
 Uses app.backend for Bedrock S2S session and tools.
 """
 
+import asyncio
 import base64
 import json
 import logging
