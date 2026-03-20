@@ -1149,6 +1149,13 @@
             <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
             <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 Edge TTS</button>
             <button id="assistantV2vSvara" class="assistant-v2v-btn" title="Voice-to-voice (Svara TTS): speak and hear spoken reply">🔊 Svara TTS</button>
+            <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
+                <label for="assistantV2vSvaraVoice" style="font-size:0.85em; color:#666;">Svara voice</label>
+                <select id="assistantV2vSvaraVoice" style="padding:4px; font-size:0.85em;">
+                    <option value="en_male" selected>Male</option>
+                    <option value="en_female">Female</option>
+                </select>
+            </div>
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
                 <span class="material-icons-outlined">record_voice_over</span>
                 <span>Nova</span>
@@ -3057,6 +3064,7 @@
         const assistantNovaBtn = document.getElementById('assistantNova');
         const assistantNovaWsBtn = document.getElementById('assistantNovaWs');
         const assistantNovaGptBtn = document.getElementById('assistantNovaGpt');
+        const assistantV2vSvaraVoice = document.getElementById('assistantV2vSvaraVoice');
         let assistantSessionId = null;
         let novaGptRecordingUsed = false;
         let novaGptRecognition = null;
@@ -3432,6 +3440,8 @@
                 const form = new FormData();
                 form.append('file', blob, 'audio.webm');
                 if (assistantSessionId) form.append('session_id', assistantSessionId);
+                const svaraVoiceId = (assistantV2vSvaraVoice && assistantV2vSvaraVoice.value || '').trim();
+                if (svaraVoiceId) form.append('voice_id', svaraVoiceId);
                 const response = await fetch('/api/features/assistant/v2v-svara', { method: 'POST', body: form });
                 const data = await response.json();
                 if (!response.ok) {

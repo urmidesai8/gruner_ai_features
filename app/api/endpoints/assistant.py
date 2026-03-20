@@ -626,6 +626,7 @@ async def assistant_v2v(
 async def assistant_v2v_svara(
     file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
     session_id: Optional[str] = Form(None),
+    voice_id: Optional[str] = Form(None),
 ) -> JSONResponse:
     """
     Voice-to-voice: user speaks → transcribe (Groq Whisper) → Strands agent → TTS (svara-tts)
@@ -697,7 +698,7 @@ async def assistant_v2v_svara(
     audio_error: Optional[str] = None
     if reply_text:
         try:
-            audio_bytes, audio_content_type = await text_to_speech_svara(reply_text)
+            audio_bytes, audio_content_type = await text_to_speech_svara(reply_text, voice_id=voice_id)
             if audio_bytes:
                 audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
         except Exception as e:
