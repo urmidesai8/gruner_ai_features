@@ -9,13 +9,15 @@ This service extracts tasks from meeting transcriptions by:
 import re
 from typing import List, Dict, Optional, Tuple
 
-try:
-    import spacy
-    from spacy.matcher import Matcher
-    SPACY_AVAILABLE = True
-except ImportError:
-    SPACY_AVAILABLE = False
-    print("Warning: spaCy not installed. Meeting task extraction will not work.")
+# --- spaCy disabled (not installed; meeting task extraction not in use) ---
+# try:
+#     import spacy
+#     from spacy.matcher import Matcher
+#     SPACY_AVAILABLE = True
+# except ImportError:
+#     SPACY_AVAILABLE = False
+#     print("Warning: spaCy not installed. Meeting task extraction will not work.")
+SPACY_AVAILABLE = False
 
 
 # Task trigger verbs (imperative/modal verbs that indicate tasks)

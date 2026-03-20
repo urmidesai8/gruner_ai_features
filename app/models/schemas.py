@@ -90,25 +90,27 @@ class ChatHistory:
     """Stores chat message history with unread tracking and AI state management using Redis."""
 
     def __init__(self) -> None:
-        # Redis connection
-        try:
-            self.redis_client = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
-                db=settings.REDIS_DB,
-                decode_responses=settings.REDIS_DECODE_RESPONSES,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-            )
-            # Test connection
-            self.redis_client.ping()
-            print("Connected to Redis successfully")
-        except (redis.ConnectionError, redis.TimeoutError) as e:
-            print(f"Warning: Could not connect to Redis: {e}")
-            print("Falling back to in-memory storage")
-            self.redis_client = None
-            self.messages: List[ChatMessage] = []
+        # --- Redis disabled (not running; saves ~5s startup timeout) ---
+        # try:
+        #     self.redis_client = redis.Redis(
+        #         host=settings.REDIS_HOST,
+        #         port=settings.REDIS_PORT,
+        #         password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+        #         db=settings.REDIS_DB,
+        #         decode_responses=settings.REDIS_DECODE_RESPONSES,
+        #         socket_connect_timeout=5,
+        #         socket_timeout=5,
+        #     )
+        #     # Test connection
+        #     self.redis_client.ping()
+        #     print("Connected to Redis successfully")
+        # except (redis.ConnectionError, redis.TimeoutError) as e:
+        #     print(f"Warning: Could not connect to Redis: {e}")
+        #     print("Falling back to in-memory storage")
+        #     self.redis_client = None
+        #     self.messages: List[ChatMessage] = []
+        self.redis_client = None
+        self.messages: List[ChatMessage] = []
         
         # Redis keys
         self.MESSAGES_KEY = "chat:messages"

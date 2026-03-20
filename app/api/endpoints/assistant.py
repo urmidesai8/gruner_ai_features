@@ -33,23 +33,26 @@ router = APIRouter()
 # Session / memory store (Redis preferred; in-memory fallback when Redis unavailable)
 # ---------------------------------------------------------------------------
 
-try:
-    import redis
-    _redis = redis.Redis(
-        host=settings.REDIS_HOST,
-        port=settings.REDIS_PORT,
-        password=settings.REDIS_PASSWORD or None,
-        db=settings.REDIS_DB,
-        decode_responses=settings.REDIS_DECODE_RESPONSES,
-        socket_connect_timeout=5,
-        socket_timeout=5,
-    )
-    _redis.ping()
-    _REDIS_AVAILABLE = True
-except Exception as e:
-    logger.warning("Redis unavailable for assistant sessions: %s. Using in-memory fallback.", e)
-    _redis = None
-    _REDIS_AVAILABLE = False
+# --- Redis disabled (not running; saves ~5s startup timeout) ---
+# try:
+#     import redis
+#     _redis = redis.Redis(
+#         host=settings.REDIS_HOST,
+#         port=settings.REDIS_PORT,
+#         password=settings.REDIS_PASSWORD or None,
+#         db=settings.REDIS_DB,
+#         decode_responses=settings.REDIS_DECODE_RESPONSES,
+#         socket_connect_timeout=5,
+#         socket_timeout=5,
+#     )
+#     _redis.ping()
+#     _REDIS_AVAILABLE = True
+# except Exception as e:
+#     logger.warning("Redis unavailable for assistant sessions: %s. Using in-memory fallback.", e)
+#     _redis = None
+#     _REDIS_AVAILABLE = False
+_redis = None
+_REDIS_AVAILABLE = False
 
 _ASSISTANT_KEY_PREFIX = "assistant:session:"
 _IN_MEMORY_SESSIONS: dict[str, List[dict[str, str]]] = {}
