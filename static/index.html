@@ -1148,6 +1148,7 @@
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
             <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
             <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 Edge TTS</button>
+            <button id="assistantV2vSvara" class="assistant-v2v-btn" title="Voice-to-voice (Svara TTS): speak and hear spoken reply">🔊 Svara TTS</button>
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
                 <span class="material-icons-outlined">record_voice_over</span>
                 <span>Nova</span>
@@ -3068,6 +3069,10 @@
         let assistantV2vRecordingStream = null;
         let assistantV2vRecordingChunks = [];
         let assistantV2vAudio = null;
+        let assistantV2vSvaraMediaRecorder = null;
+        let assistantV2vSvaraRecordingStream = null;
+        let assistantV2vSvaraRecordingChunks = [];
+        let assistantV2vSvaraAudio = null;
         // Nova Sonic voice (same server via Socket.IO)
         let novaSocket = null;
         let novaRecordingStream = null;
@@ -3311,6 +3316,10 @@
 
         function startV2vRecording() {
             if (assistantV2vMediaRecorder && assistantV2vMediaRecorder.state === 'recording') return;
+            if (assistantV2vSvaraMediaRecorder && assistantV2vSvaraMediaRecorder.state === 'recording') {
+                appendAssistantMessage('assistant', 'Finish Svara TTS recording first.');
+                return;
+            }
             const v2vBtn = document.getElementById('assistantV2v');
             navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
                 assistantV2vRecordingStream = stream;
@@ -3378,6 +3387,82 @@
             }
         }
 
+        function startV2vSvaraRecording() {
+            if (assistantV2vSvaraMediaRecorder && assistantV2vSvaraMediaRecorder.state === 'recording') return;
+            if (assistantV2vMediaRecorder && assistantV2vMediaRecorder.state === 'recording') {
+                appendAssistantMessage('assistant', 'Finish Edge TTS recording first.');
+                return;
+            }
+
+            const v2vBtn = document.getElementById('assistantV2vSvara');
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                assistantV2vSvaraRecordingStream = stream;
+                assistantV2vSvaraRecordingChunks = [];
+                const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+                assistantV2vSvaraMediaRecorder = new MediaRecorder(stream);
+                assistantV2vSvaraMediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) assistantV2vSvaraRecordingChunks.push(e.data); };
+                assistantV2vSvaraMediaRecorder.onstop = () => {
+                    if (assistantV2vSvaraRecordingStream) assistantV2vSvaraRecordingStream.getTracks().forEach(t => t.stop());
+                    assistantV2vSvaraRecordingStream = null;
+                    if (assistantV2vSvaraRecordingChunks.length > 0) {
+                        const blob = new Blob(assistantV2vSvaraRecordingChunks, { type: mime });
+                        sendAssistantV2vSvara(blob);
+                    }
+                    assistantV2vSvaraMediaRecorder = null;
+                    if (v2vBtn) { v2vBtn.classList.remove('recording'); v2vBtn.title = 'Voice-to-voice (Svara TTS): speak and hear spoken reply'; }
+                };
+                assistantV2vSvaraMediaRecorder.start(100);
+                if (v2vBtn) { v2vBtn.classList.add('recording'); v2vBtn.title = 'Click to stop and hear reply'; }
+            }).catch(err => {
+                console.error('Svara TTS microphone failed:', err);
+                appendAssistantMessage('assistant', 'Could not access microphone. Please allow audio and try again.');
+            });
+        }
+
+        function stopV2vSvaraRecording() {
+            if (!assistantV2vSvaraMediaRecorder || assistantV2vSvaraMediaRecorder.state !== 'recording') return;
+            assistantV2vSvaraMediaRecorder.stop();
+        }
+
+        async function sendAssistantV2vSvara(blob) {
+            const userMsgNode = appendAssistantMessage('user', '(Voice – processing…)');
+            userMsgNode.dataset.v2vPlaceholder = 'true';
+            const thinkingNode = appendAssistantMessage('assistant', 'Transcribing, thinking, and generating Svara speech…');
+            try {
+                const form = new FormData();
+                form.append('file', blob, 'audio.webm');
+                if (assistantSessionId) form.append('session_id', assistantSessionId);
+                const response = await fetch('/api/features/assistant/v2v-svara', { method: 'POST', body: form });
+                const data = await response.json();
+                if (!response.ok) {
+                    thinkingNode.textContent = data.detail || 'Request failed.';
+                    if (userMsgNode) userMsgNode.remove();
+                    return;
+                }
+                const transcript = (data.transcription || '').trim();
+                userMsgNode.textContent = transcript ? `You said: ${transcript}` : '(No speech detected)';
+                delete userMsgNode.dataset.v2vPlaceholder;
+                const replyText = data.reply || '(No response)';
+                thinkingNode.textContent = replyText;
+                if (data.session_id) assistantSessionId = data.session_id;
+                attachAssistantFeedback(thinkingNode, replyText);
+                if (data.audio_base64) {
+                    const audioBytes = Uint8Array.from(atob(data.audio_base64), c => c.charCodeAt(0));
+                    const audioBlob = new Blob([audioBytes], { type: data.audio_content_type || 'audio/wav' });
+                    const url = URL.createObjectURL(audioBlob);
+                    if (assistantV2vSvaraAudio) { assistantV2vSvaraAudio.pause(); assistantV2vSvaraAudio.src = ''; }
+                    assistantV2vSvaraAudio = new Audio(url);
+                    assistantV2vSvaraAudio.onended = () => URL.revokeObjectURL(url);
+                    await assistantV2vSvaraAudio.play();
+                } else if (data.audio_error) {
+                    thinkingNode.textContent = replyText + '\n[Audio error: ' + (data.audio_error || 'unknown') + ']';
+                }
+            } catch (error) {
+                thinkingNode.textContent = 'Error: ' + error.message;
+                if (userMsgNode && userMsgNode.dataset.v2vPlaceholder) userMsgNode.remove();
+            }
+        }
+
         function attachAssistantFeedback(node, replyText) {
             if (!node || !replyText || node.dataset.feedbackAttached === 'true') return;
             node.dataset.feedbackAttached = 'true';
@@ -3437,6 +3522,17 @@
                     stopV2vRecording();
                 } else {
                     startV2vRecording();
+                }
+            });
+        }
+
+        const assistantV2vSvara = document.getElementById('assistantV2vSvara');
+        if (assistantV2vSvara) {
+            assistantV2vSvara.addEventListener('click', () => {
+                if (assistantV2vSvaraMediaRecorder && assistantV2vSvaraMediaRecorder.state === 'recording') {
+                    stopV2vSvaraRecording();
+                } else {
+                    startV2vSvaraRecording();
                 }
             });
         }

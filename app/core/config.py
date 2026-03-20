@@ -44,6 +44,25 @@ class Settings:
     # Edge TTS (voice-to-voice): TTS voice for assistant reply (edge-tts voice id)
     TTS_VOICE: str = os.getenv("TTS_VOICE", "en-US-JennyNeural")
 
+    # Svara TTS (voice-to-voice) via the external `svara-tts-inference` API.
+    # You need to run that service separately (FastAPI + vLLM/SNAC).
+    #
+    # Expected request: POST {SVARA_TTS_API_URL}/v1/text-to-speech with form fields:
+    # - text, voice, response_format, stream, model_id
+    # Default matches svara-tts-inference docs (FastAPI server port 8080).
+    # Override via environment if you run it elsewhere.
+    SVARA_TTS_API_URL: str = os.getenv("SVARA_TTS_API_URL", "http://localhost:8080")
+    SVARA_VOICE_ID: str = os.getenv("SVARA_VOICE_ID", "en_male")
+    SVARA_MODEL_ID: str = os.getenv("SVARA_MODEL_ID", "svara-tts-v1")
+    SVARA_MAX_TEXT_CHARS: int = int(os.getenv("SVARA_MAX_TEXT_CHARS", "5000"))
+    SVARA_TTS_TIMEOUT_SECONDS: float = float(os.getenv("SVARA_TTS_TIMEOUT_SECONDS", "120"))
+
+    # AWS SageMaker Settings for Svara TTS
+    AWS_ACCESS_KEY_ID: str = os.getenv("AWS_ACCESS_KEY_ID", "")
+    AWS_SECRET_ACCESS_KEY: str = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    AWS_REGION: str = os.getenv("AWS_REGION", "ap-south-1")
+    SAGEMAKER_TTS_ENDPOINT_NAME: str = os.getenv("SAGEMAKER_TTS_ENDPOINT_NAME", "gruner-chat-svara-tts")
+
     # Nova Sonic voice backend (optional) — Socket.IO server URL for live voice
     NOVA_VOICE_URL: str = os.getenv("NOVA_VOICE_URL", "")
 
