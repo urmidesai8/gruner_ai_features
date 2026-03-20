@@ -1148,12 +1148,146 @@
             <textarea id="assistantInput" placeholder="Type your question..."></textarea>
             <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
             <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 Edge TTS</button>
+            <div style="display:flex; align-items:center; gap:6px; margin-left:2px; margin-right:6px;">
+                <label for="assistantV2vVoice" style="font-size:0.85em; color:#666; display:none;">Voice</label>
+                <select id="assistantV2vVoice" style="padding:4px; font-size:0.85em; max-width:140px;" title="Edge TTS Voice">
+                    <optgroup label="English">
+                        <option value="en-US-JennyNeural" selected>🇺🇸 English – Jenny (F)</option>
+                        <option value="en-US-GuyNeural">🇺🇸 English – Guy (M)</option>
+                        <option value="en-GB-SoniaNeural">🇬🇧 English – Sonia (F)</option>
+                        <option value="en-GB-RyanNeural">🇬🇧 English – Ryan (M)</option>
+                        <option value="en-IN-NeerjaNeural">🇮🇳 English – Neerja (F)</option>
+                        <option value="en-IN-PrabhatNeural">🇮🇳 English – Prabhat (M)</option>
+                    </optgroup>
+                    <optgroup label="Spanish">
+                        <option value="es-ES-ElviraNeural">🇪🇸 Spanish – Elvira (F)</option>
+                        <option value="es-ES-AlvaroNeural">🇪🇸 Spanish – Alvaro (M)</option>
+                        <option value="es-MX-DaliaNeural">🇲🇽 Spanish – Dalia (F)</option>
+                        <option value="es-MX-JorgeNeural">🇲🇽 Spanish – Jorge (M)</option>
+                    </optgroup>
+                    <optgroup label="French">
+                        <option value="fr-FR-DeniseNeural">🇫🇷 French – Denise (F)</option>
+                        <option value="fr-FR-HenriNeural">🇫🇷 French – Henri (M)</option>
+                    </optgroup>
+                    <optgroup label="German">
+                        <option value="de-DE-KatjaNeural">🇩🇪 German – Katja (F)</option>
+                        <option value="de-DE-ConradNeural">🇩🇪 German – Conrad (M)</option>
+                    </optgroup>
+                    <optgroup label="Italian">
+                        <option value="it-IT-ElsaNeural">🇮🇹 Italian – Elsa (F)</option>
+                        <option value="it-IT-IsabellaNeural">🇮🇹 Italian – Isabella (F)</option>
+                        <option value="it-IT-DiegoNeural">🇮🇹 Italian – Diego (M)</option>
+                    </optgroup>
+                    <optgroup label="Indian Languages">
+                        <option value="hi-IN-SwaraNeural">🇮🇳 Hindi – Swara (F)</option>
+                        <option value="hi-IN-MadhurNeural">🇮🇳 Hindi – Madhur (M)</option>
+                        <option value="bn-IN-TanishaaNeural">🇮🇳 Bengali – Tanishaa (F)</option>
+                        <option value="bn-IN-BashkarNeural">🇮🇳 Bengali – Bashkar (M)</option>
+                        <option value="ta-IN-PallaviNeural">🇮🇳 Tamil – Pallavi (F)</option>
+                        <option value="ta-IN-ValluvarNeural">🇮🇳 Tamil – Valluvar (M)</option>
+                        <option value="te-IN-ShrutiNeural">🇮🇳 Telugu – Shruti (F)</option>
+                        <option value="te-IN-MohanNeural">🇮🇳 Telugu – Mohan (M)</option>
+                        <option value="ur-IN-GulNeural">🇮🇳 Urdu – Gul (F)</option>
+                        <option value="ur-IN-SalmanNeural">🇮🇳 Urdu – Salman (M)</option>
+                    </optgroup>
+                    <optgroup label="Asian Languages">
+                        <option value="ja-JP-NanamiNeural">🇯🇵 Japanese – Nanami (F)</option>
+                        <option value="ja-JP-KeitaNeural">🇯🇵 Japanese – Keita (M)</option>
+                        <option value="zh-CN-XiaoxiaoNeural">🇨🇳 Chinese – Xiaoxiao (F)</option>
+                        <option value="zh-CN-YunxiNeural">🇨🇳 Chinese – Yunxi (M)</option>
+                        <option value="ko-KR-SunHiNeural">🇰🇷 Korean – SunHi (F)</option>
+                        <option value="ko-KR-InJoonNeural">🇰🇷 Korean – InJoon (M)</option>
+                    </optgroup>
+                    <optgroup label="Other">
+                        <option value="pt-BR-FranciscaNeural">🇧🇷 Portuguese (BR) – Francisca (F)</option>
+                        <option value="pt-BR-AntonioNeural">🇧🇷 Portuguese (BR) – Antonio (M)</option>
+                        <option value="ru-RU-SvetlanaNeural">🇷🇺 Russian – Svetlana (F)</option>
+                        <option value="ru-RU-DmitryNeural">🇷🇺 Russian – Dmitry (M)</option>
+                        <option value="ar-SA-ZariyahNeural">🇸🇦 Arabic – Zariyah (F)</option>
+                        <option value="ar-SA-HamedNeural">🇸🇦 Arabic – Hamed (M)</option>
+                    </optgroup>
+                </select>
+            </div>
             <button id="assistantV2vSvara" class="assistant-v2v-btn" title="Voice-to-voice (Svara TTS): speak and hear spoken reply">🔊 Svara TTS</button>
             <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
-                <label for="assistantV2vSvaraVoice" style="font-size:0.85em; color:#666;">Svara voice</label>
-                <select id="assistantV2vSvaraVoice" style="padding:4px; font-size:0.85em;">
-                    <option value="en_male" selected>Male</option>
-                    <option value="en_female">Female</option>
+                <label for="assistantV2vSvaraVoice" style="font-size:0.85em; color:#666;">Voice</label>
+                <select id="assistantV2vSvaraVoice" style="padding:4px; font-size:0.85em; max-width:160px;">
+                    <optgroup label="English (Indian)">
+                        <option value="en_male" selected>🇮🇳 English – Male</option>
+                        <option value="en_female">🇮🇳 English – Female</option>
+                    </optgroup>
+                    <optgroup label="Hindi">
+                        <option value="hi_male">🇮🇳 Hindi – Male</option>
+                        <option value="hi_female">🇮🇳 Hindi – Female</option>
+                    </optgroup>
+                    <optgroup label="Bengali">
+                        <option value="bn_male">🇮🇳 Bengali – Male</option>
+                        <option value="bn_female">🇮🇳 Bengali – Female</option>
+                    </optgroup>
+                    <optgroup label="Tamil">
+                        <option value="ta_male">🇮🇳 Tamil – Male</option>
+                        <option value="ta_female">🇮🇳 Tamil – Female</option>
+                    </optgroup>
+                    <optgroup label="Telugu">
+                        <option value="te_male">🇮🇳 Telugu – Male</option>
+                        <option value="te_female">🇮🇳 Telugu – Female</option>
+                    </optgroup>
+                    <optgroup label="Marathi">
+                        <option value="mr_male">🇮🇳 Marathi – Male</option>
+                        <option value="mr_female">🇮🇳 Marathi – Female</option>
+                    </optgroup>
+                    <optgroup label="Gujarati">
+                        <option value="gu_male">🇮🇳 Gujarati – Male</option>
+                        <option value="gu_female">🇮🇳 Gujarati – Female</option>
+                    </optgroup>
+                    <optgroup label="Kannada">
+                        <option value="kn_male">🇮🇳 Kannada – Male</option>
+                        <option value="kn_female">🇮🇳 Kannada – Female</option>
+                    </optgroup>
+                    <optgroup label="Malayalam">
+                        <option value="ml_male">🇮🇳 Malayalam – Male</option>
+                        <option value="ml_female">🇮🇳 Malayalam – Female</option>
+                    </optgroup>
+                    <optgroup label="Punjabi">
+                        <option value="pa_male">🇮🇳 Punjabi – Male</option>
+                        <option value="pa_female">🇮🇳 Punjabi – Female</option>
+                    </optgroup>
+                    <optgroup label="Odia">
+                        <option value="or_male">🇮🇳 Odia – Male</option>
+                        <option value="or_female">🇮🇳 Odia – Female</option>
+                    </optgroup>
+                    <optgroup label="Assamese">
+                        <option value="as_male">🇮🇳 Assamese – Male</option>
+                        <option value="as_female">🇮🇳 Assamese – Female</option>
+                    </optgroup>
+                    <optgroup label="Nepali">
+                        <option value="ne_male">🇳🇵 Nepali – Male</option>
+                        <option value="ne_female">🇳🇵 Nepali – Female</option>
+                    </optgroup>
+                    <optgroup label="Sanskrit">
+                        <option value="sa_male">🇮🇳 Sanskrit – Male</option>
+                        <option value="sa_female">🇮🇳 Sanskrit – Female</option>
+                    </optgroup>
+                    <optgroup label="Maithili">
+                        <option value="mai_male">🇮🇳 Maithili – Male</option>
+                        <option value="mai_female">🇮🇳 Maithili – Female</option>
+                    </optgroup>
+                    <optgroup label="Bhojpuri">
+                        <option value="bho_male">🇮🇳 Bhojpuri – Male</option>
+                        <option value="bho_female">🇮🇳 Bhojpuri – Female</option>
+                    </optgroup>
+                    <optgroup label="Urdu">
+                        <option value="ur_male">🇵🇰 Urdu – Male</option>
+                        <option value="ur_female">🇵🇰 Urdu – Female</option>
+                    </optgroup>
+                    <optgroup label="Sindhi">
+                        <option value="sd_male">🇮🇳 Sindhi – Male</option>
+                        <option value="sd_female">🇮🇳 Sindhi – Female</option>
+                    </optgroup>
+                    <optgroup label="Manipuri">
+                        <option value="mni_male">🇮🇳 Manipuri – Male</option>
+                        <option value="mni_female">🇮🇳 Manipuri – Female</option>
+                    </optgroup>
                 </select>
             </div>
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
@@ -3064,6 +3198,7 @@
         const assistantNovaBtn = document.getElementById('assistantNova');
         const assistantNovaWsBtn = document.getElementById('assistantNovaWs');
         const assistantNovaGptBtn = document.getElementById('assistantNovaGpt');
+        const assistantV2vVoice = document.getElementById('assistantV2vVoice');
         const assistantV2vSvaraVoice = document.getElementById('assistantV2vSvaraVoice');
         let assistantSessionId = null;
         let novaGptRecordingUsed = false;
@@ -3228,10 +3363,14 @@
                     attachAssistantFeedback(thinkingNode, assistantReply);
                     if (shouldSpeakReply && assistantReply.trim()) {
                         try {
+                            const edgeVoiceId = (assistantV2vVoice && assistantV2vVoice.value || '').trim();
+                            const payload = { text: assistantReply.trim() };
+                            if (edgeVoiceId) payload.voice = edgeVoiceId;
+                            
                             const speakRes = await fetch('/api/features/assistant/speak', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ text: assistantReply.trim() })
+                                body: JSON.stringify(payload)
                             });
                             if (speakRes.ok) {
                                 const data = await speakRes.json();
@@ -3366,6 +3505,8 @@
                 const form = new FormData();
                 form.append('file', blob, 'audio.webm');
                 if (assistantSessionId) form.append('session_id', assistantSessionId);
+                const edgeVoiceId = (assistantV2vVoice && assistantV2vVoice.value || '').trim();
+                if (edgeVoiceId) form.append('voice', edgeVoiceId);
                 const response = await fetch('/api/features/assistant/v2v', { method: 'POST', body: form });
                 const data = await response.json();
                 if (!response.ok) {

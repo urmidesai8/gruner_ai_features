@@ -330,6 +330,7 @@ class AssistantFeedbackRequest(BaseModel):
 class AssistantSpeakRequest(BaseModel):
     """Request body for TTS: speak the given text (e.g. after GPT-Edge reply)."""
     text: str = Field(..., min_length=1, max_length=settings.ASSISTANT_MAX_MESSAGE_LENGTH)
+    voice: Optional[str] = Field(None, description="Optional Edge TTS voice id")
 
 
 @router.post("/assistant/speak")
@@ -342,7 +343,7 @@ async def assistant_speak(request: AssistantSpeakRequest) -> JSONResponse:
     if not text:
         raise HTTPException(status_code=400, detail="Text is required.")
     try:
-        audio_bytes = await text_to_speech(text)
+        audio_bytes = await text_to_speech(text, voice=request.voice)
         if not audio_bytes:
             raise HTTPException(status_code=500, detail="TTS produced no audio.")
         audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
@@ -539,6 +540,7 @@ async def assistant_audio(
 async def assistant_v2v(
     file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
     session_id: Optional[str] = Form(None),
+    voice: Optional[str] = Form(None),
 ) -> JSONResponse:
     """
     Voice-to-voice: user speaks → transcribe (Groq Whisper) → Strands agent → TTS (edge-tts) → return reply + audio.
@@ -582,6 +584,38 @@ async def assistant_v2v(
     sid = (session_id or "").strip() or str(uuid.uuid4())
     history = get_session_messages(sid)
     prompt = build_context_from_history(history, message)
+    # Edge TTS Language Mapping based on voice ID prefix
+    _EDGE_LANG_MAP = {
+        "af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "az": "Azerbaijani", 
+        "bg": "Bulgarian", "bn": "Bengali", "bs": "Bosnian", "ca": "Catalan", 
+        "cs": "Czech", "cy": "Welsh", "da": "Danish", "de": "German", "el": "Greek", 
+        "en": "English", "es": "Spanish", "et": "Estonian", "fa": "Persian", 
+        "fi": "Finnish", "fil": "Filipino", "fr": "French", "ga": "Irish", 
+        "gl": "Galician", "gu": "Gujarati", "he": "Hebrew", "hi": "Hindi", 
+        "hr": "Croatian", "hu": "Hungarian", "id": "Indonesian", "is": "Icelandic", 
+        "it": "Italian", "ja": "Japanese", "jv": "Javanese", "ka": "Georgian", 
+        "kk": "Kazakh", "km": "Khmer", "kn": "Kannada", "ko": "Korean", "lo": "Lao", 
+        "lt": "Lithuanian", "lv": "Latvian", "mk": "Macedonian", "ml": "Malayalam", 
+        "mn": "Mongolian", "mr": "Marathi", "ms": "Malay", "mt": "Maltese", 
+        "my": "Burmese", "nb": "Norwegian Bokmål", "ne": "Nepali", "nl": "Dutch", 
+        "pl": "Polish", "ps": "Pashto", "pt": "Portuguese", "ro": "Romanian", 
+        "ru": "Russian", "si": "Sinhala", "sk": "Slovak", "sl": "Slovenian", 
+        "so": "Somali", "sq": "Albanian", "sr": "Serbian", "su": "Sundanese", 
+        "sv": "Swedish", "sw": "Swahili", "ta": "Tamil", "te": "Telugu", 
+        "th": "Thai", "tr": "Turkish", "uk": "Ukrainian", "ur": "Urdu", 
+        "uz": "Uzbek", "vi": "Vietnamese", "zu": "Zulu", "zh": "Chinese"
+    }
+    
+    if voice:
+        lang_code = voice.split("-")[0] if "-" in voice else voice
+        lang_name = _EDGE_LANG_MAP.get(lang_code, "")
+        if lang_name and lang_code != "en":
+            prompt = (
+                f"{prompt}\n\n"
+                f"IMPORTANT: The user has selected {lang_name} as their preferred language. "
+                f"You MUST respond entirely in {lang_name} language using {lang_name} script. "
+                f"Do NOT respond in English."
+            )
 
     executor = _get_executor()
     try:
@@ -606,7 +640,7 @@ async def assistant_v2v(
     audio_base64 = ""
     if reply_text:
         try:
-            audio_bytes = await text_to_speech(reply_text)
+            audio_bytes = await text_to_speech(reply_text, voice=voice)
             if audio_bytes:
                 audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
         except Exception as e:
@@ -674,6 +708,25 @@ async def assistant_v2v_svara(
     sid = (session_id or "").strip() or str(uuid.uuid4())
     history = get_session_messages(sid)
     prompt = build_context_from_history(history, message)
+
+    # Map voice_id prefix to language name so the LLM responds in the correct language
+    _VOICE_LANG_MAP = {
+        "en": "English", "hi": "Hindi", "bn": "Bengali", "ta": "Tamil",
+        "te": "Telugu", "mr": "Marathi", "gu": "Gujarati", "kn": "Kannada",
+        "ml": "Malayalam", "pa": "Punjabi", "or": "Odia", "as": "Assamese",
+        "ne": "Nepali", "sa": "Sanskrit", "mai": "Maithili", "bho": "Bhojpuri",
+        "ur": "Urdu", "sd": "Sindhi", "mni": "Manipuri",
+    }
+    if voice_id:
+        lang_code = voice_id.rsplit("_", 1)[0] if "_" in voice_id else voice_id
+        lang_name = _VOICE_LANG_MAP.get(lang_code, "")
+        if lang_name and lang_code != "en":
+            prompt = (
+                f"{prompt}\n\n"
+                f"IMPORTANT: The user has selected {lang_name} as their preferred language. "
+                f"You MUST respond entirely in {lang_name} language using {lang_name} script. "
+                f"Do NOT respond in English."
+            )
 
     executor = _get_executor()
     try:
