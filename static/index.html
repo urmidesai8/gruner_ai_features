@@ -442,6 +442,35 @@
             min-height: 400px;
         }
 
+        .assistant-voice-toolbar {
+            padding: 6px 10px;
+            background: #f3effe;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .assistant-voice-toolbar label {
+            font-size: 0.78em;
+            color: #5c35a0;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .assistant-voice-toolbar select {
+            padding: 3px 6px;
+            font-size: 0.82em;
+            border-radius: 5px;
+            border: 1px solid #c5b4e3;
+            background: #fff;
+            flex: 1;
+            min-width: 120px;
+            max-width: 220px;
+        }
+
         .assistant-header {
             padding: 10px 12px;
             background: #6200ea;
@@ -607,6 +636,28 @@
         }
         .assistant-v2v-btn.recording {
             background: #c62828;
+            animation: assistant-pulse 1s ease-in-out infinite;
+        }
+        .assistant-svara-btn {
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: none;
+            background: linear-gradient(135deg, #d81b60 0%, #ad1457 100%);
+            color: #fff;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s, box-shadow 0.2s;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .assistant-svara-btn:hover {
+            background: linear-gradient(135deg, #ad1457 0%, #880e4f 100%);
+            box-shadow: 0 2px 8px rgba(216, 27, 96, 0.4);
+        }
+        .assistant-svara-btn.recording {
+            background: linear-gradient(135deg, #c62828 0%, #e53935 100%);
             animation: assistant-pulse 1s ease-in-out infinite;
         }
         .assistant-nova-btn {
@@ -1139,18 +1190,11 @@
                 <div id="assistantClose" class="assistant-header-close" title="Close">&times;</div>
             </div>
         </div>
-        <div id="assistantMessages" class="assistant-messages">
-            <div class="assistant-message assistant">
-                Hi! I can summarize text, draft responses, or translate text. Ask me anything.
-            </div>
-        </div>
-        <div class="assistant-input-area">
-            <textarea id="assistantInput" placeholder="Type your question..."></textarea>
-            <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
-            <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice: speak and hear spoken reply">🔊 Edge TTS</button>
-            <div style="display:flex; align-items:center; gap:6px; margin-left:2px; margin-right:6px;">
-                <label for="assistantV2vVoice" style="font-size:0.85em; color:#666; display:none;">Voice</label>
-                <select id="assistantV2vVoice" style="padding:4px; font-size:0.85em; max-width:140px;" title="Edge TTS Voice">
+
+        <!-- Voice selection toolbar (top) -->
+        <div class="assistant-voice-toolbar">
+            <label for="assistantV2vVoice">🔊 Edge TTS Voice:</label>
+            <select id="assistantV2vVoice" title="Edge TTS Voice">
                     <optgroup label="English">
                         <option value="en-US-JennyNeural" selected>🇺🇸 English – Jenny (F)</option>
                         <option value="en-US-GuyNeural">🇺🇸 English – Guy (M)</option>
@@ -1207,11 +1251,8 @@
                         <option value="ar-SA-HamedNeural">🇸🇦 Arabic – Hamed (M)</option>
                     </optgroup>
                 </select>
-            </div>
-            <button id="assistantV2vSvara" class="assistant-v2v-btn" title="Voice-to-voice (Svara TTS): speak and hear spoken reply">🔊 Svara TTS</button>
-            <div style="display:flex; align-items:center; gap:6px; margin-left:6px;">
-                <label for="assistantV2vSvaraVoice" style="font-size:0.85em; color:#666;">Voice</label>
-                <select id="assistantV2vSvaraVoice" style="padding:4px; font-size:0.85em; max-width:160px;">
+            <label for="assistantV2vSvaraVoice">🇮🇳 Svara TTS Voice:</label>
+            <select id="assistantV2vSvaraVoice" title="Svara TTS Voice">
                     <optgroup label="English (Indian)">
                         <option value="en_male" selected>🇮🇳 English – Male</option>
                         <option value="en_female">🇮🇳 English – Female</option>
@@ -1289,7 +1330,29 @@
                         <option value="mni_female">🇮🇳 Manipuri – Female</option>
                     </optgroup>
                 </select>
+            <label for="assistantV2vSvaraEmotion">Emotion:</label>
+            <select id="assistantV2vSvaraEmotion" style="padding:2px 4px; font-size:0.85em; max-width:90px;" title="Emotion Tag">
+                <option value="auto" selected>Auto</option>
+                <option value="neutral">Neutral</option>
+                <option value="happy">Happy</option>
+                <option value="sad">Sad</option>
+                <option value="angry">Angry</option>
+                <option value="excited">Excited</option>
+                <option value="surprised">Surprised</option>
+            </select>
+        </div>
+        <!-- End voice toolbar -->
+
+        <div id="assistantMessages" class="assistant-messages">
+            <div class="assistant-message assistant">
+                Hi! I can summarize text, draft responses, or translate text. Ask me anything.
             </div>
+        </div>
+        <div class="assistant-input-area">
+            <textarea id="assistantInput" placeholder="Type your question..."></textarea>
+            <button id="assistantMic" class="assistant-mic-btn" title="Voice note: speak, get text reply">🎤</button>
+            <button id="assistantV2v" class="assistant-v2v-btn" title="Voice-to-voice (Edge TTS): speak and hear spoken reply">🔊 Edge TTS</button>
+            <button id="assistantV2vSvara" class="assistant-svara-btn" title="Voice-to-voice (Svara TTS): speak and hear spoken reply">🔊 Svara TTS</button>
             <button id="assistantNova" class="assistant-nova-btn" title="Nova Sonic: live voice with Amazon Nova 2">
                 <span class="material-icons-outlined">record_voice_over</span>
                 <span>Nova</span>
@@ -3583,6 +3646,10 @@
                 if (assistantSessionId) form.append('session_id', assistantSessionId);
                 const svaraVoiceId = (assistantV2vSvaraVoice && assistantV2vSvaraVoice.value || '').trim();
                 if (svaraVoiceId) form.append('voice_id', svaraVoiceId);
+                const emotionNode = document.getElementById('assistantV2vSvaraEmotion');
+                const emotionVal = (emotionNode && emotionNode.value || 'neutral').trim();
+                if (emotionVal) form.append('emotion', emotionVal);
+                
                 const response = await fetch('/api/features/assistant/v2v-svara', { method: 'POST', body: form });
                 const data = await response.json();
                 if (!response.ok) {

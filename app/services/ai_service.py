@@ -252,10 +252,18 @@ def call_groq_ai(prompt: str, model_name: str = None) -> str:
     except Exception as e:
         return f"Error: {str(e)}"
 
-def transcribe_audio(file_buffer) -> str:
+def transcribe_audio(file_buffer, language: str | None = None) -> str:
     """
     Transcribe audio file using Groq Whisper.
-    file_buffer: file-like object with .name attribute (needed by Groq client)
+
+    Args:
+        file_buffer: File-like object with a ``.name`` attribute (required by
+            the Groq client).
+        language: BCP-47 language code (e.g. ``"en"``, ``"hi"``, ``"mr"``).
+            Pass ``None`` (default) to let Whisper auto-detect the language.
+
+    Returns:
+        Transcribed text, or an error string starting with ``"Error:"``.
     """
     if not groq_client:
         return "Error: missing dependency 'groq'. Please install it."
@@ -263,13 +271,16 @@ def transcribe_audio(file_buffer) -> str:
         return "Error: GROQ_API_KEY not set."
 
     try:
-        transcription = groq_client.audio.transcriptions.create(
-            file=file_buffer,
-            model="whisper-large-v3",
-            response_format="json",
-            language="en",
-            temperature=0.0
-        )
+        create_kwargs: dict = {
+            "file": file_buffer,
+            "model": "whisper-large-v3",
+            "response_format": "json",
+            "temperature": 0.0,
+        }
+        if language:
+            create_kwargs["language"] = language
+
+        transcription = groq_client.audio.transcriptions.create(**create_kwargs)
         return transcription.text
     except Exception as e:
         return f"Error transcription failed: {str(e)}"

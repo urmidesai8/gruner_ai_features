@@ -8,7 +8,9 @@ import base64
 import io
 import json
 import logging
+import re
 import threading
+import time
 import uuid
 from typing import Any, List, Optional
 
@@ -662,14 +664,21 @@ async def assistant_v2v_svara(
     file: UploadFile = File(..., description="Audio recording (e.g. webm, wav, mp3)"),
     session_id: Optional[str] = Form(None),
     voice_id: Optional[str] = Form(None),
+    emotion: Optional[str] = Form("neutral"),
 ) -> JSONResponse:
     """
     Voice-to-voice: user speaks → transcribe (Groq Whisper) → Strands agent → TTS (svara-tts)
     → return reply + audio.
 
     Same session memory as text/audio endpoints. Returns reply text, transcription,
-    session_id, and audio_base64 (MP3 bytes base64-encoded).
+    session_id, and audio_base64 (WAV bytes base64-encoded).
     """
+    t_request_start = time.perf_counter()
+    logger.info(
+        "[v2v-svara] Request received | voice_id=%s session_id=%s",
+        voice_id, session_id,
+    )
+
     if not file.filename and not getattr(file, "content_type", ""):
         raise HTTPException(status_code=400, detail="Audio file is required.")
 
@@ -681,19 +690,41 @@ async def assistant_v2v_svara(
     if not content or len(content) < 100:
         raise HTTPException(status_code=400, detail="Audio data too short or empty.")
 
+    logger.info(
+        "[v2v-svara] Audio received | filename=%s size_bytes=%d",
+        file.filename or "audio.webm", len(content),
+    )
+
     filename = file.filename or "audio.webm"
     buf = io.BytesIO(content)
     buf.name = filename
 
+    # Derive BCP-47 language code from voice_id (e.g. "mr_female" → "mr").
+    # Fall back to None so Whisper auto-detects when voice_id is unknown/unsupplied.
+    _SVARA_LANG_CODES = {
+        "en", "hi", "bn", "ta", "te", "mr", "gu", "kn",
+        "ml", "pa", "or", "as", "ne", "sa", "ur", "sd",
+    }
+    stt_language: str | None = None
+    if voice_id:
+        lang_prefix = voice_id.rsplit("_", 1)[0] if "_" in voice_id else voice_id
+        stt_language = lang_prefix if lang_prefix in _SVARA_LANG_CODES else None
+
+    logger.info(
+        "[v2v-svara] STT starting | model=whisper-large-v3 language=%s",
+        stt_language or "auto-detect",
+    )
+    t_stt_start = time.perf_counter()
     loop = asyncio.get_event_loop()
     try:
         transcription = await loop.run_in_executor(
             None,
-            lambda: transcribe_audio((filename, buf)),
+            lambda: transcribe_audio((filename, buf), language=stt_language),
         )
     except Exception as e:
-        logger.exception("Svara TTS transcription failed")
+        logger.exception("[v2v-svara] STT failed after %.2fs", time.perf_counter() - t_stt_start)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}") from e
+    t_stt_elapsed = time.perf_counter() - t_stt_start
 
     if not transcription or (isinstance(transcription, str) and transcription.strip().lower().startswith("error")):
         raise HTTPException(
@@ -704,6 +735,11 @@ async def assistant_v2v_svara(
     message = transcription.strip()
     if len(message) > settings.ASSISTANT_MAX_MESSAGE_LENGTH:
         message = message[: settings.ASSISTANT_MAX_MESSAGE_LENGTH]
+
+    logger.info(
+        "[v2v-svara] STT complete | elapsed=%.2fs chars=%d text=%r",
+        t_stt_elapsed, len(message), message[:80],
+    )
 
     sid = (session_id or "").strip() or str(uuid.uuid4())
     history = get_session_messages(sid)
@@ -728,6 +764,18 @@ async def assistant_v2v_svara(
                 f"Do NOT respond in English."
             )
 
+    if emotion == "auto":
+        prompt = (
+            f"{prompt}\n\n"
+            'IMPORTANT: The user has set the emotion to "Auto". You MUST determine the appropriate '
+            'emotion for your reply based on the conversation context. '
+            'Your final response MUST be a valid JSON object with EXACTLY two keys: "reply" (your literal response text) '
+            'and "emotion" (one of: "neutral", "happy", "sad", "angry", "excited", "surprised"). '
+            'Do NOT include any other text or markdown outside of the JSON block.'
+        )
+
+    logger.info("[v2v-svara] LLM starting | session_id=%s emotion_mode=%s", sid, emotion)
+    t_llm_start = time.perf_counter()
     executor = _get_executor()
     try:
         reply = await loop.run_in_executor(
@@ -736,8 +784,29 @@ async def assistant_v2v_svara(
         )
         reply_text = str(reply).strip()
     except Exception as e:
-        logger.exception("Svara TTS assistant agent failed")
+        logger.exception("[v2v-svara] LLM failed after %.2fs", time.perf_counter() - t_llm_start)
         raise HTTPException(status_code=500, detail=f"Assistant failed: {e}") from e
+    t_llm_elapsed = time.perf_counter() - t_llm_start
+    
+    detected_emotion = emotion
+    if emotion == "auto":
+        try:
+            match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", reply_text, re.DOTALL)
+            json_str = match.group(1) if match else reply_text
+            data = json.loads(json_str)
+            reply_text = data.get("reply", reply_text)
+            detected_emotion = data.get("emotion", "neutral").lower()
+            valid_emotions = {"neutral", "happy", "sad", "angry", "excited", "surprised"}
+            if detected_emotion not in valid_emotions:
+                detected_emotion = "neutral"
+        except Exception as e:
+            logger.warning("[v2v-svara] Could not parse JSON for auto-emotion. Fallback to neutral. Error: %s", e)
+            detected_emotion = "neutral"
+
+    logger.info(
+        "[v2v-svara] LLM complete | elapsed=%.2fs detected_emotion=%s reply_chars=%d reply=%r",
+        t_llm_elapsed, detected_emotion, len(reply_text), reply_text[:80],
+    )
 
     append_session_messages(
         sid,
@@ -750,14 +819,39 @@ async def assistant_v2v_svara(
     audio_base64 = ""
     audio_content_type = "audio/mpeg"
     audio_error: Optional[str] = None
+    t_tts_elapsed = 0.0
     if reply_text:
+        logger.info(
+            "[v2v-svara] TTS starting | voice_id=%s reply_chars=%d",
+            voice_id, len(reply_text),
+        )
+        t_tts_start = time.perf_counter()
         try:
-            audio_bytes, audio_content_type = await text_to_speech_svara(reply_text, voice_id=voice_id)
+            audio_bytes, audio_content_type = await text_to_speech_svara(reply_text, voice_id=voice_id, emotion=detected_emotion)
+            t_tts_elapsed = time.perf_counter() - t_tts_start
             if audio_bytes:
                 audio_base64 = base64.b64encode(audio_bytes).decode("ascii")
+                logger.info(
+                    "[v2v-svara] TTS complete | elapsed=%.2fs audio_bytes=%d",
+                    t_tts_elapsed, len(audio_bytes),
+                )
+            else:
+                logger.warning("[v2v-svara] TTS returned empty audio after %.2fs", t_tts_elapsed)
         except Exception as e:
-            logger.warning("Svara TTS failed (reply still returned as text): %s", e)
+            t_tts_elapsed = time.perf_counter() - t_tts_start
+            logger.warning(
+                "[v2v-svara] TTS failed after %.2fs (reply still returned as text): %s",
+                t_tts_elapsed, e,
+            )
             audio_error = str(e)
+
+    t_total_elapsed = time.perf_counter() - t_request_start
+    logger.info(
+        "[v2v-svara] Request complete | total=%.2fs stt=%.2fs llm=%.2fs tts=%.2fs"
+        " | voice_id=%s session_id=%s",
+        t_total_elapsed, t_stt_elapsed, t_llm_elapsed, t_tts_elapsed,
+        voice_id, sid,
+    )
 
     return JSONResponse(
         content={

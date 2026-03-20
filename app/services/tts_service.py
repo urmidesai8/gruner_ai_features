@@ -11,6 +11,7 @@ import re
 import struct
 import logging
 import json
+import time
 from typing import Optional, Tuple
 
 import boto3
@@ -165,6 +166,7 @@ def _invoke_sagemaker_tts(
     region: str,
     aws_access_key: str,
     aws_secret_key: str,
+    emotion: str = "neutral",
 ) -> bytes:
     """
     Synchronous helper that invokes the SageMaker endpoint using boto3.
@@ -178,13 +180,19 @@ def _invoke_sagemaker_tts(
     boto_session = boto3.Session(**session_kwargs)
     client = boto_session.client("sagemaker-runtime")
 
-    payload = {"inputs": text, "voice_id": voice}
+    payload = {"inputs": text, "voice_id": voice, "emotion_tag": emotion}
+    logger.debug(
+        "[svara-tts] SageMaker invoke | endpoint=%s voice=%s emotion=%s text_chars=%d",
+        endpoint_name, voice, emotion, len(text),
+    )
+    t_invoke_start = time.perf_counter()
 
     response = client.invoke_endpoint(
         EndpointName=endpoint_name,
         ContentType="application/json",
         Body=json.dumps(payload),
     )
+    t_invoke_elapsed = time.perf_counter() - t_invoke_start
 
     result = json.loads(response["Body"].read())
 
@@ -199,12 +207,18 @@ def _invoke_sagemaker_tts(
     if not audio_b64:
         raise RuntimeError("SageMaker Svara TTS response missing 'audio_base64'.")
 
-    return base64.b64decode(audio_b64)
+    audio_bytes = base64.b64decode(audio_b64)
+    logger.info(
+        "[svara-tts] SageMaker response | elapsed=%.2fs audio_bytes=%d",
+        t_invoke_elapsed, len(audio_bytes),
+    )
+    return audio_bytes
 
 
 async def text_to_speech_svara(
     text: str,
     voice_id: Optional[str] = None,
+    emotion: str = "neutral",
 ) -> Tuple[bytes, str]:
     """
     Convert text to speech using the kenpath/svara-tts-v1 model hosted on
@@ -239,10 +253,20 @@ async def text_to_speech_svara(
     if not chunks:
         return b"", "audio/wav"
 
+    logger.info(
+        "[svara-tts] Starting TTS | chunks=%d total_chars=%d voice=%s endpoint=%s",
+        len(chunks), len(text), voice, endpoint_name,
+    )
+    t_total_start = time.perf_counter()
     all_audio: list[bytes] = []
     loop = asyncio.get_event_loop()
 
-    for chunk in chunks:
+    for idx, chunk in enumerate(chunks):
+        logger.debug(
+            "[svara-tts] Chunk %d/%d | chars=%d preview=%r",
+            idx + 1, len(chunks), len(chunk), chunk[:40],
+        )
+        t_chunk_start = time.perf_counter()
         try:
             chunk_audio = await loop.run_in_executor(
                 None,
@@ -253,13 +277,27 @@ async def text_to_speech_svara(
                     region=region,
                     aws_access_key=aws_access_key,
                     aws_secret_key=aws_secret_key,
+                    emotion=emotion,
                 ),
             )
+            t_chunk_elapsed = time.perf_counter() - t_chunk_start
             if chunk_audio:
                 all_audio.append(chunk_audio)
+                logger.debug(
+                    "[svara-tts] Chunk %d/%d done | elapsed=%.2fs audio_bytes=%d",
+                    idx + 1, len(chunks), t_chunk_elapsed, len(chunk_audio),
+                )
         except Exception as e:
-            logger.exception("SageMaker invoke_endpoint failed for chunk '%s...'", chunk[:30])
+            logger.exception(
+                "[svara-tts] Chunk %d/%d failed after %.2fs | preview='%s...'",
+                idx + 1, len(chunks), time.perf_counter() - t_chunk_start, chunk[:30],
+            )
             raise RuntimeError(f"Failed to reach SageMaker Svara TTS endpoint: {e}") from e
 
     audio_bytes = b"".join(all_audio)
+    t_total_elapsed = time.perf_counter() - t_total_start
+    logger.info(
+        "[svara-tts] TTS complete | total_elapsed=%.2fs chunks=%d total_audio_bytes=%d",
+        t_total_elapsed, len(chunks), len(audio_bytes),
+    )
     return audio_bytes, "audio/wav"

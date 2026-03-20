@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from concurrent.futures import InvalidStateError
 
 from fastapi import FastAPI
@@ -8,6 +9,11 @@ from fastapi.responses import FileResponse
 from app.api.endpoints import chat, memory, documents, audio, meeting, websocket, assistant
 from app.api.endpoints import nova_ws
 from app.nova.socket_handlers import create_socket_app
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s:     %(message)s (%(name)s)",
+)
 
 
 def _connection_aware_exception_handler(loop, context):
